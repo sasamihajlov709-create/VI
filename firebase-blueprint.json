@@ -1,0 +1,83 @@
+{
+  "collections": {
+    "users": {
+      "schema": {
+        "uid": "string",
+        "displayName": "string",
+        "username": "string",
+        "email": "string",
+        "photoURL": "string",
+        "bio": "string",
+        "statusMessage": "string",
+        "onlineStatus": "string",
+        "lastSeen": "number",
+        "createdAt": "number"
+      }
+    },
+    "chats": {
+      "schema": {
+        "id": "string",
+        "type": "string",
+        "title": "string",
+        "photoURL": "string",
+        "members": "array",
+        "admins": "array",
+        "creatorId": "string",
+        "createdAt": "number",
+        "updatedAt": "number",
+        "pinnedIds": "array",
+        "archivedIds": "array",
+        "muteIds": "array",
+        "unreadCounts": "map"
+      }
+    },
+    "messages": {
+      "schema": {
+        "id": "string",
+        "chatId": "string",
+        "senderId": "string",
+        "senderName": "string",
+        "senderPhotoURL": "string",
+        "text": "string",
+        "type": "string",
+        "fileUrl": "string",
+        "fileName": "string",
+        "fileSize": "number",
+        "duration": "number",
+        "createdAt": "number",
+        "updatedAt": "number",
+        "replyTo": "map",
+        "forwardFrom": "map",
+        "reactions": "map",
+        "readBy": "array"
+      }
+    },
+    "calls": {
+      "schema": {
+        "id": "string",
+        "callerId": "string",
+        "callerName": "string",
+        "callerPhotoURL": "string",
+        "receiverId": "string",
+        "status": "string",
+        "type": "string",
+        "createdAt": "number",
+        "endedAt": "number"
+      }
+    },
+    "stories": {
+      "schema": {
+        "id": "string",
+        "userId": "string",
+        "userDisplayName": "string",
+        "userPhotoURL": "string",
+        "mediaUrl": "string",
+        "mediaType": "string",
+        "createdAt": "number",
+        "expiresAt": "number",
+        "views": "array",
+        "reactions": "map"
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    // --- Users ---
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.auth.uid == userId;
+      allow update: if isAuth() && request.auth.uid == userId;
+      allow delete: if false; // Account deletion must be handled through administrative service
+    }
+
+    // --- Chats ---
+    match /chats/{chatId} {
+      allow read: if isAuth() && (
+        resource.data.type == 'public' || 
+        resource.data.type == 'channel' || 
+        resource.data.members.hasAny([request.auth.uid])
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.members.hasAny([request.auth.uid]) || 
+        resource.data.type == 'public' || 
+        resource.data.type == 'channel' ||
+        (request.resource != null && request.resource.data.members.hasAny([request.auth.uid]))
+      );
+      allow delete: if isAuth() && (
+        resource.data.creatorId == request.auth.uid || 
+        resource.data.admins.hasAny([request.auth.uid])
+      );
+    }
+
+    // --- Messages ---
+    match /messages/{messageId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.senderId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'reactions', 'poll'])
+      );
+      allow delete: if isAuth() && (
+        resource.data.senderId == request.auth.uid
+      );
+    }
+
+    // --- Calls (WebRTC signaling) ---
+    match /calls/{callId} {
+      allow read: if isAuth() && (
+        resource.data.callerId == request.auth.uid || 
+        resource.data.receiverId == request.auth.uid
+      );
+      allow create: if isAuth() && (
+        request.resource.data.callerId == request.auth.uid || 
+        request.resource.data.receiverId == request.auth.uid
+      );
+      allow update: if isAuth() && (
+        resource.data.callerId == request.auth.uid || 
+        resource.data.receiverId == request.auth.uid
+      );
+      allow delete: if isAuth() && (
+        resource.data.callerId == request.auth.uid
+      );
+      
+      // WebRTC nested signals
+      match /signalData/{signalId} {
+        allow read, write: if isAuth(); 
+      }
+    }
+
+    // --- Stories ---
+    match /stories/{storyId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'reactions'])
+      );
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    // --- Reports ---
+    match /reports/{reportId} {
+      allow create: if isAuth();
+      allow read, update, delete: if false; 
+    }
+  }
+}

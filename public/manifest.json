@@ -1,0 +1,22 @@
+{
+  "short_name": "VI Messenger",
+  "name": "VI Messenger - Realtime & WebRTC Platform",
+  "description": "Enterprise-grade real-time messenger with WebRTC voice/video calls, stories, and offline synchronization",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/color/192/speech-bubble.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://img.icons8.com/color/512/speech-bubble.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0B1527",
+  "theme_color": "#1F2937",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -1,0 +1,175 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export interface UserProfile {
+  uid: string;
+  displayName: string;
+  username: string;
+  email: string;
+  photoURL: string;
+  bio: string;
+  statusMessage: string;
+  onlineStatus: 'online' | 'offline';
+  lastSeen: number; // timestamp ms
+  createdAt: number; // timestamp ms
+  contacts: string[]; // uids
+  blockedUsers: string[]; // uids
+  folders?: ChatFolder[];
+  stickers?: string[]; // array of custom sticker urls
+}
+
+export interface ChatFolder {
+  id: string;
+  name: string;
+  icon: string;
+  chatIds: string[];
+}
+
+export type ChatType = 'direct' | 'group' | 'channel' | 'public';
+
+export interface Chat {
+  id: string;
+  type: ChatType;
+  title: string;
+  photoURL: string;
+  members: string[]; // user uids
+  admins: string[]; // admin uids
+  creatorId: string;
+  createdAt: number;
+  updatedAt: number;
+  pinnedIds?: string[]; // uids who pinned
+  archivedIds?: string[]; // uids who archived
+  muteIds?: string[]; // uids who muted
+  unreadCounts?: { [userId: string]: number };
+  lastMessage?: {
+    text: string;
+    senderId: string;
+    senderName: string;
+    timestamp: number;
+  };
+  rules?: string;
+  welcomeMessage?: string;
+  typing?: { [userId: string]: number }; // map of userId to last typing timestamp
+  pinnedMessageId?: string; // pinned message per chat
+  pinnedMessageIds?: string[]; // support for multiple pinned messages
+  topics?: Topic[]; // topic-based forum mode
+  linkedChatId?: string; // forum group linked to channel for comment sections
+  slowModeSeconds?: number;
+  isBot?: boolean;
+}
+
+export interface Topic {
+  id: string;
+  name: string;
+  createdAt: number;
+  creatorId: string;
+  closed?: boolean;
+  icon?: string;
+  pinnedMessageId?: string;
+}
+
+export interface PollOption {
+  text: string;
+  votes: string[]; // user uids
+}
+
+export interface PollPayload {
+  question: string;
+  options: PollOption[];
+  isAnonymous: boolean;
+  isMultiple: boolean;
+  isQuiz?: boolean;
+  correctOptionIndex?: number;
+  closed?: boolean;
+  expiresAt?: number;
+}
+
+export interface EditHistoryEntry {
+  text: string;
+  updatedAt: number;
+}
+
+export type MessageType = 'text' | 'image' | 'video' | 'voice' | 'file' | 'sticker' | 'poll';
+
+export interface ReplyToPayload {
+  messageId: string;
+  text: string;
+  senderName: string;
+}
+
+export interface ForwardFromPayload {
+  senderId: string;
+  senderName: string;
+}
+
+export interface Message {
+  id: string;
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  senderPhotoURL: string;
+  text: string;
+  type: MessageType;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  duration?: number; // voice note duration in seconds
+  createdAt: number;
+  updatedAt: number;
+  replyTo?: ReplyToPayload;
+  forwardFrom?: ForwardFromPayload;
+  reactions?: { [userId: string]: string }; // userId -> reactionEmoji
+  readBy?: string[]; // array of uids who read this message
+  localId?: string; // used for offline optimistic UI identification
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  silent?: boolean;
+  scheduledAt?: number; // timestamp to release message
+  reminderAt?: number; // reminder alarm timestamp
+  editHistory?: EditHistoryEntry[];
+  poll?: PollPayload;
+  topicId?: string; // topic in forum mode
+}
+
+export type CallStatus = 'ringing' | 'connected' | 'rejected' | 'ended' | 'missed';
+export type CallType = 'voice' | 'video';
+
+export interface CallSession {
+  id: string;
+  callerId: string;
+  callerName: string;
+  callerPhotoURL: string;
+  receiverId: string;
+  receiverName?: string;
+  receiverPhotoURL?: string;
+  status: CallStatus;
+  type: CallType;
+  createdAt: number;
+  endedAt?: number;
+  signal_offer?: string; // SDP string
+  signal_answer?: string; // SDP string
+}
+
+export interface Story {
+  id: string;
+  userId: string;
+  userDisplayName: string;
+  userPhotoURL: string;
+  mediaUrl: string;
+  mediaType: 'image' | 'video';
+  createdAt: number;
+  expiresAt: number;
+  views: string[]; // user uids who viewed
+  reactions?: { [userId: string]: string }; // user uid -> reactionEmoji
+}
+
+export interface ReportItem {
+  id: string;
+  reporterId: string;
+  reportedUserId: string;
+  chatId?: string;
+  messageId?: string;
+  reason: string;
+  createdAt: number;
+}
