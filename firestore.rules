@@ -37,8 +37,15 @@ service cloud.firestore {
 
     // --- Messages ---
     match /messages/{messageId} {
-      allow read: if isAuth();
-      allow create: if isAuth();
+      allow read: if isAuth() && (
+        get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data.members.hasAny([request.auth.uid]) ||
+        get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data.type == 'public' ||
+        get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data.type == 'channel'
+      );
+      allow create: if isAuth() && (
+        get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.members.hasAny([request.auth.uid]) ||
+        get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.type == 'public'
+      );
       allow update: if isAuth() && (
         resource.data.senderId == request.auth.uid ||
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'reactions', 'poll'])
