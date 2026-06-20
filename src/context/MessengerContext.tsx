@@ -74,7 +74,31 @@ interface MessengerContextType {
   loginGoogle: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateMyProfile: (displayName: string, bio: string, statusMsg: string, photoURL?: string) => Promise<void>;
+  updateMyProfile: (
+    displayName: string, 
+    bio: string, 
+    statusMsg: string, 
+    photoURL?: string, 
+    emojiStatus?: string, 
+    phoneNumber?: string,
+    privacySettings?: UserProfile['privacySettings']
+  ) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  deleteAvatar: () => Promise<void>;
+  updateFolder: (folderId: string, name: string, icon: string, chatIds: string[], rules?: ('direct' | 'group' | 'channel' | 'unread' | 'work' | 'friends')[]) => Promise<void>;
+  sortFolders: (folders: ChatFolder[]) => Promise<void>;
+  getRecommendedUsers: () => Promise<UserProfile[]>;
+  terminateSession: (sessionId: string) => Promise<void>;
+  banUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
+  unbanUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
+  muteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
+  unmuteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
+  promoteUser: (chatId: string, targetUid: string, targetName: string, role: 'admin' | 'moderator') => Promise<void>;
+  demoteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
+  joinChat: (chatId: string) => Promise<void>;
+  leaveChat: (chatId: string) => Promise<void>;
+  incrementMessageView: (chatId: string, messageId: string) => Promise<void>;
+  getOrCreateSavedMessagesChat: () => Promise<Chat>;
   
   // Chat actions
   createDirectChat: (targetUser: UserProfile) => Promise<Chat>;
@@ -130,6 +154,11 @@ interface MessengerContextType {
   setIsRightPanelOpen: (open: boolean) => void;
   theme: string;
   setTheme: (t: string) => void;
+  selectedUserProfile: UserProfile | null;
+  setSelectedUserProfile: (profile: UserProfile | null) => void;
+  addMemberToChat: (chatId: string, targetUid: string) => Promise<void>;
+  joinChatByInviteCode: (inviteCode: string) => Promise<Chat>;
+  updateGroupInfo: (chatId: string, title: string, description?: string, photoURL?: string) => Promise<void>;
 }
 
 const MessengerContext = createContext<MessengerContextType | undefined>(undefined);
@@ -152,11 +181,19 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<{ [msgId: string]: number }>({});
+  const [selectedUserProfile, setSelectedUserProfile] = useState<UserProfile | null>(null);
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('app-theme') || 'theme-dark-glass');
 
-  const setTheme = (t: string) => {
+  const setTheme = async (t: string) => {
     setThemeState(t);
     localStorage.setItem('app-theme', t);
+    if (currentUser) {
+      try {
+        await updateDoc(doc(db, 'users', currentUser.uid), { theme: t });
+      } catch (e) {
+        console.warn("Failed to sync theme to firestore:", e);
+      }
+    }
   };
   const activeChatRef = useRef<Chat | null>(null);
   const chatsRef = useRef<Chat[]>([]);
@@ -209,6 +246,30 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
         
+        // Auto-register current device session
+        const currentSessions = profileDetails.activeSessions || [];
+        const isDeviceRegistered = currentSessions.some(s => s.deviceName.includes(navigator.userAgent.substring(0, 30)));
+        if (!isDeviceRegistered) {
+          const freshSession: ActiveSession = {
+            id: Math.random().toString(36).substring(2, 9),
+            deviceName: `${navigator.userAgent.split(')')[0].split('(')[1] || 'Web Session'} - Browser`,
+            lastActive: Date.now()
+          };
+          await updateDoc(userRef, {
+            activeSessions: [...currentSessions, freshSession]
+          });
+        } else {
+          const updated = currentSessions.map(s => {
+            if (s.deviceName.includes(navigator.userAgent.substring(0, 30))) {
+              return { ...s, lastActive: Date.now() };
+            }
+            return s;
+          });
+          await updateDoc(userRef, {
+            activeSessions: updated
+          });
+        }
+        
         setUserProfile(profileDetails);
         setBlockedUsersList(profileDetails.blockedUsers || []);
         
@@ -218,6 +279,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const up = docSnap.data() as UserProfile;
             setUserProfile(up);
             setBlockedUsersList(up.blockedUsers || []);
+            // Bidirectional Real-time Theme synchronization
+            if (up.theme && up.theme !== localStorage.getItem('app-theme')) {
+              setThemeState(up.theme);
+              localStorage.setItem('app-theme', up.theme);
+            }
           }
         }, (error) => {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
@@ -612,19 +678,124 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await signOut(auth);
   };
 
-  const updateMyProfile = async (displayName: string, bio: string, statusMsg: string, photoURL?: string) => {
-    if (!currentUser) return;
-    const updates: Partial<UserProfile> = {
+  const updateMyProfile = async (
+    displayName: string, 
+    bio: string, 
+    statusMsg: string, 
+    photoURL?: string, 
+    emojiStatus?: string, 
+    phoneNumber?: string,
+    privacySettings?: UserProfile['privacySettings']
+  ) => {
+    if (!currentUser || !userProfile) return;
+    
+    const history = userProfile.profileChangeHistory || [];
+    const newHistory = [...history];
+    
+    const recordChange = (field: string, oldValue: string, newValue: string) => {
+      if (oldValue !== newValue) {
+        newHistory.push({ field, oldValue, newValue, timestamp: Date.now() });
+      }
+    };
+    
+    recordChange('displayName', userProfile.displayName || '', displayName);
+    recordChange('bio', userProfile.bio || '', bio);
+    recordChange('statusMessage', userProfile.statusMessage || '', statusMsg);
+    recordChange('emojiStatus', userProfile.emojiStatus || '', emojiStatus || '');
+    recordChange('phoneNumber', userProfile.phoneNumber || '', phoneNumber || '');
+    
+    const updates: any = {
       displayName: displayName.trim(),
       bio: bio.trim(),
       statusMessage: statusMsg.trim(),
+      emojiStatus: emojiStatus || '',
+      phoneNumber: phoneNumber || '',
+      profileChangeHistory: newHistory,
       lastSeen: Date.now()
     };
+    
     if (photoURL) {
+      recordChange('photoURL', userProfile.photoURL || '', photoURL);
       updates.photoURL = photoURL;
       await updateProfile(currentUser, { photoURL });
     }
+    
+    if (privacySettings) {
+      updates.privacySettings = privacySettings;
+    }
+    
     await updateDoc(doc(db, 'users', currentUser.uid), updates);
+    await updateProfile(currentUser, { displayName: displayName.trim() });
+  };
+
+  const uploadAvatar = async (file: File) => {
+    if (!currentUser || !userProfile) return;
+    const fileExtensionRef = file.name.split('.').pop() || 'png';
+    const filePath = `avatars/${currentUser.uid}.${fileExtensionRef}`;
+    const storageTargetRef = storageRef(storage, filePath);
+    await uploadBytesResumable(storageTargetRef, file);
+    const downloadUrl = await getDownloadURL(storageTargetRef);
+    
+    const history = userProfile.profileChangeHistory || [];
+    const entry = {
+      field: 'photoURL',
+      oldValue: userProfile.photoURL,
+      newValue: downloadUrl,
+      timestamp: Date.now()
+    };
+    
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      photoURL: downloadUrl,
+      profileChangeHistory: [...history, entry]
+    });
+    await updateProfile(currentUser, { photoURL: downloadUrl });
+  };
+
+  const deleteAvatar = async () => {
+    if (!currentUser || !userProfile) return;
+    const placeholder = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(userProfile.displayName || 'VI')}`;
+    
+    const history = userProfile.profileChangeHistory || [];
+    const entry = {
+      field: 'photoURL',
+      oldValue: userProfile.photoURL,
+      newValue: placeholder,
+      timestamp: Date.now()
+    };
+    
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      photoURL: placeholder,
+      profileChangeHistory: [...history, entry]
+    });
+    await updateProfile(currentUser, { photoURL: placeholder });
+  };
+
+  const getRecommendedUsers = async (): Promise<UserProfile[]> => {
+    try {
+      const q = query(collection(db, 'users'), limit(30));
+      const snap = await getDocs(q);
+      const existingContacts = new Set(userProfile?.contacts || []);
+      const recs: UserProfile[] = [];
+      snap.docs.forEach(docSnap => {
+        const u = docSnap.data() as UserProfile;
+        if (u.uid !== currentUser?.uid && !existingContacts.has(u.uid)) {
+          recs.push(u);
+        }
+      });
+      return recs.slice(0, 5);
+    } catch (e) {
+      console.error("Error fetching recommended users:", e);
+      return [];
+    }
+  };
+
+  const terminateSession = async (sessionId: string) => {
+    if (!currentUser || !userProfile) return;
+    const currentSessions = userProfile.activeSessions || [];
+    const updated = currentSessions.filter(s => s.id !== sessionId);
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      activeSessions: updated
+    });
   };
 
   // Direct Chats & Chat Creation Procedures
@@ -778,18 +949,132 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const addMemberToChat = async (chatId: string, targetUid: string) => {
+    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+    const chatDocRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatDocRef);
+    if (!chatSnap.exists()) throw new Error('Chat not found');
+    const chatData = chatSnap.data() as Chat;
+
+    if (chatData.members.includes(targetUid)) {
+      throw new Error('User is already a member of this chat');
+    }
+
+    // Load target user profile
+    const targetSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', targetUid)));
+    if (targetSnap.empty) throw new Error('User not found');
+    const targetProfile = targetSnap.docs[0].data() as UserProfile;
+
+    await updateDoc(chatDocRef, {
+      members: arrayUnion(targetUid)
+    });
+
+    // Send system message
+    const systemMsgId = doc(collection(db, 'messages')).id;
+    const systemMsg: Message = {
+      id: systemMsgId,
+      chatId: chatId,
+      senderId: 'SYSTEM',
+      senderName: 'VI Assistant',
+      senderPhotoURL: 'https://img.icons8.com/color/192/speech-bubble.png',
+      text: `${targetProfile.displayName} was added to the chat by ${userProfile.displayName}.`,
+      type: 'text',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      readBy: [currentUser.uid]
+    };
+    await setDoc(doc(db, 'messages', systemMsgId), systemMsg);
+  };
+
+  const joinChatByInviteCode = async (inviteCode: string) => {
+    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+    let chatId = inviteCode.trim();
+    if (chatId.includes('/invite/')) {
+      chatId = chatId.split('/invite/').pop() || '';
+    } else if (chatId.startsWith('invite_')) {
+      chatId = chatId.substring(7);
+    }
+
+    if (!chatId) throw new Error('Invalid invite link or code');
+
+    const chatDocRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatDocRef);
+    if (!chatSnap.exists()) {
+      throw new Error('Group chat not found');
+    }
+
+    const chatData = chatSnap.data() as Chat;
+    if (chatData.members.includes(currentUser.uid)) {
+      throw new Error('You are already a member of this chat');
+    }
+
+    await updateDoc(chatDocRef, {
+      members: arrayUnion(currentUser.uid)
+    });
+
+    // Send system message
+    const systemMsgId = doc(collection(db, 'messages')).id;
+    const systemMsg: Message = {
+      id: systemMsgId,
+      chatId: chatId,
+      senderId: 'SYSTEM',
+      senderName: 'VI Assistant',
+      senderPhotoURL: 'https://img.icons8.com/color/192/speech-bubble.png',
+      text: `${userProfile.displayName} has joined the chat via invite link.`,
+      type: 'text',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      readBy: [currentUser.uid]
+    };
+    await setDoc(doc(db, 'messages', systemMsgId), systemMsg);
+
+    return chatData;
+  };
+
+  const updateGroupInfo = async (chatId: string, title: string, description?: string, photoURL?: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatDocRef = doc(db, 'chats', chatId);
+    await updateDoc(chatDocRef, {
+      title: title.trim(),
+      description: description?.trim() || '',
+      photoURL: photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(title)}`,
+      updatedAt: Date.now()
+    });
+  };
+
   // Folders state managers
-  const createFolder = async (name: string, icon: string, chatIds: string[]) => {
+  const createFolder = async (name: string, icon: string, chatIds: string[], rules?: ('direct' | 'group' | 'channel' | 'unread' | 'work' | 'friends')[]) => {
     if (!currentUser || !userProfile) return;
     const finalFolder: ChatFolder = {
       id: Math.random().toString(36).substring(2, 9),
       name,
       icon,
-      chatIds
+      chatIds,
+      rules: rules || []
     };
     const currentFolders = userProfile.folders || [];
     await updateDoc(doc(db, 'users', currentUser.uid), {
       folders: [...currentFolders, finalFolder]
+    });
+  };
+
+  const updateFolder = async (folderId: string, name: string, icon: string, chatIds: string[], rules?: ('direct' | 'group' | 'channel' | 'unread' | 'work' | 'friends')[]) => {
+    if (!currentUser || !userProfile) return;
+    const updatedFolders = (userProfile.folders || []).map(f => {
+      if (f.id === folderId) {
+        return { ...f, name, icon, chatIds, rules: rules || [] };
+      }
+      return f;
+    });
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      folders: updatedFolders
+    });
+  };
+
+  const sortFolders = async (sortedFolders: ChatFolder[]) => {
+    if (!currentUser || !userProfile) return;
+    await updateDoc(doc(db, 'users', currentUser.uid), {
+      folders: sortedFolders
     });
   };
 
@@ -1468,7 +1753,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsSidebarOpen,
       setIsRightPanelOpen,
       theme,
-      setTheme
+      setTheme,
+      selectedUserProfile,
+      setSelectedUserProfile,
+      addMemberToChat,
+      joinChatByInviteCode,
+      updateGroupInfo
     }}>
       {children}
     </MessengerContext.Provider>

@@ -18,6 +18,24 @@ export interface UserProfile {
   blockedUsers: string[]; // uids
   folders?: ChatFolder[];
   stickers?: string[]; // array of custom sticker urls
+  emojiStatus?: string; // custom emoji status indicator
+  phoneNumber?: string; // custom phone number
+  theme?: string; // real-time synced user visual preference
+  privacySettings?: {
+    phoneNumber?: 'all' | 'contacts' | 'nobody';
+    statusMessage?: 'all' | 'contacts' | 'nobody';
+    photoURL?: 'all' | 'contacts' | 'nobody';
+    lastSeen?: 'all' | 'contacts' | 'nobody';
+    onlineStatus?: 'all' | 'contacts' | 'nobody';
+  };
+  profileChangeHistory?: { field: string; oldValue: string; newValue: string; timestamp: number }[];
+  activeSessions?: ActiveSession[];
+}
+
+export interface ActiveSession {
+  id: string;
+  deviceName: string;
+  lastActive: number;
 }
 
 export interface ChatFolder {
@@ -25,6 +43,7 @@ export interface ChatFolder {
   name: string;
   icon: string;
   chatIds: string[];
+  rules?: ('direct' | 'group' | 'channel' | 'unread' | 'work' | 'friends')[];
 }
 
 export type ChatType = 'direct' | 'group' | 'channel' | 'public';
@@ -58,6 +77,23 @@ export interface Chat {
   linkedChatId?: string; // forum group linked to channel for comment sections
   slowModeSeconds?: number;
   isBot?: boolean;
+  description?: string; // chat bio/info description
+  inviteLink?: string; // group invitation link URL
+  bannedIds?: string[]; // banned user uids
+  mutedIds?: string[]; // muted user uids
+  moderatorIds?: string[]; // moderator user uids
+  adminActionsHistory?: AdminAction[]; // history log of admin actions
+  views?: { [messageId: string]: string[] }; // messageId -> user uids who viewed it
+}
+
+export interface AdminAction {
+  id: string;
+  adminId: string;
+  adminName: string;
+  action: 'ban' | 'unban' | 'mute' | 'unmute' | 'promote' | 'demote' | 'kick' | 'pin' | 'unpin';
+  targetId: string;
+  targetName: string;
+  timestamp: number;
 }
 
 export interface Topic {

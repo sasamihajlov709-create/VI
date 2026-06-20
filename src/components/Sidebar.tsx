@@ -57,7 +57,10 @@ export const Sidebar: React.FC = () => {
     createFolder,
     activeFolder,
     setActiveFolder,
-    onlineUsers
+    onlineUsers,
+    uploadAvatar,
+    deleteAvatar,
+    joinChatByInviteCode
   } = useMessenger();
 
   const { t, language, setLanguage } = useLanguage();
@@ -93,6 +96,30 @@ export const Sidebar: React.FC = () => {
   const [editDisplayName, setEditDisplayName] = useState(userProfile?.displayName || '');
   const [editBio, setEditBio] = useState(userProfile?.bio || '');
   const [editStatus, setEditStatus] = useState(userProfile?.statusMessage || '');
+  const [editEmojiStatus, setEditEmojiStatus] = useState(userProfile?.emojiStatus || '');
+  const [editPhoneNumber, setEditPhoneNumber] = useState(userProfile?.phoneNumber || '');
+  const [privacyNumber, setPrivacyNumber] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.phoneNumber || 'all');
+  const [privacyStatus, setPrivacyStatus] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.statusMessage || 'all');
+  const [privacyPhoto, setPrivacyPhoto] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.photoURL || 'all');
+  const [privacyLastSeen, setPrivacyLastSeen] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.lastSeen || 'all');
+  const [privacyOnline, setPrivacyOnline] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.onlineStatus || 'all');
+  
+  // Keep states in sync when userProfile updates in real-time
+  React.useEffect(() => {
+    if (userProfile) {
+      setEditDisplayName(userProfile.displayName || '');
+      setEditBio(userProfile.bio || '');
+      setEditStatus(userProfile.statusMessage || '');
+      setEditEmojiStatus(userProfile.emojiStatus || '');
+      setEditPhoneNumber(userProfile.phoneNumber || '');
+      setPrivacyNumber(userProfile.privacySettings?.phoneNumber || 'all');
+      setPrivacyStatus(userProfile.privacySettings?.statusMessage || 'all');
+      setPrivacyPhoto(userProfile.privacySettings?.photoURL || 'all');
+      setPrivacyLastSeen(userProfile.privacySettings?.lastSeen || 'all');
+      setPrivacyOnline(userProfile.privacySettings?.onlineStatus || 'all');
+    }
+  }, [userProfile]);
+
   const { updateMyProfile } = useMessenger();
 
   // Handle live user searching
@@ -737,10 +764,45 @@ export const Sidebar: React.FC = () => {
 
           <div className="flex-1 p-5 overflow-y-auto space-y-5">
             {/* Visual Header */}
-            <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5">
-              <img src={userProfile?.photoURL} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
-              <div className="font-semibold text-lg text-slate-200">{userProfile?.displayName}</div>
+            <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5 relative">
+              <div className="relative group w-20 h-20">
+                <img src={userProfile?.photoURL} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
+                <label className="absolute inset-0 bg-black/55 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-1">
+                  <span className="text-[9px] font-bold text-white uppercase">{language === 'ru' ? 'Изменить' : 'Change'}</span>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        try {
+                          await uploadAvatar(file);
+                        } catch (err: any) {
+                          alert(language === 'ru' ? 'Ошибка загрузки аватара: ' + err.message : 'Error uploading avatar: ' + err.message);
+                        }
+                      }
+                    }}
+                    className="hidden" 
+                  />
+                </label>
+              </div>
+              {userProfile?.photoURL && !userProfile.photoURL.includes('dicebear') && (
+                <button 
+                  onClick={async () => {
+                    if (window.confirm(language === 'ru' ? 'Удалить аватар?' : 'Delete avatar?')) {
+                      await deleteAvatar();
+                    }
+                  }}
+                  className="text-[9px] font-semibold text-rose-450 hover:text-rose-400 underline transition cursor-pointer"
+                >
+                  {language === 'ru' ? 'Удалить фото' : 'Delete photo'}
+                </button>
+              )}
+              <div className="font-semibold text-lg text-slate-200 mt-1">{userProfile?.displayName}</div>
               <div className="text-xs font-mono text-[var(--glass-accent)]">@{userProfile?.username}</div>
+              <div className="text-[10px] text-slate-505 font-mono">
+                {language === 'ru' ? 'Регистрация:' : 'Registered:'} {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}
+              </div>
             </div>
 
             {/* Premium Theme Selector glass card */}
@@ -779,7 +841,7 @@ export const Sidebar: React.FC = () => {
             {/* Profile fields Editing */}
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-mono text-slate-400 mb-1">Display Name</label>
+                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Имя' : 'Display Name'}</label>
                 <input 
                   type="text" 
                   value={editDisplayName} 
@@ -789,7 +851,7 @@ export const Sidebar: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 mb-1">Status Message</label>
+                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Статус' : 'Status Message'}</label>
                 <input 
                   type="text" 
                   value={editStatus} 
@@ -798,13 +860,99 @@ export const Sidebar: React.FC = () => {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Emoji статус' : 'Emoji Status'}</label>
+                  <input 
+                    type="text" 
+                    placeholder="🚀, 💻, 🌴"
+                    value={editEmojiStatus} 
+                    onChange={(e) => setEditEmojiStatus(e.target.value)}
+                    maxLength={3}
+                    className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-center" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Телефон' : 'Phone Number'}</label>
+                  <input 
+                    type="text" 
+                    placeholder="+7 999..."
+                    value={editPhoneNumber} 
+                    onChange={(e) => setEditPhoneNumber(e.target.value)}
+                    className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-xs font-mono text-slate-400 mb-1">Bio</label>
+                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'О себе (Bio)' : 'Bio'}</label>
                 <textarea 
                   value={editBio} 
                   onChange={(e) => setEditBio(e.target.value)} 
-                  className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 h-20 resize-none animate-fade-in-up" 
+                  className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 h-16 resize-none animate-fade-in-up" 
                 />
+              </div>
+
+              {/* Privacy Settings Accordion */}
+              <div className="p-3 bg-white/[0.02] rounded-2xl border border-white/5 space-y-3">
+                <span className="block text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">
+                  {language === 'ru' ? 'Приватность' : 'Privacy Settings'}
+                </span>
+                
+                <div className="space-y-2 text-xs">
+                  {[
+                    { label: language === 'ru' ? 'Номер телефона' : 'Phone Number', val: privacyNumber, set: setPrivacyNumber },
+                    { label: language === 'ru' ? 'Статус-сообщение' : 'Status Message', val: privacyStatus, set: setPrivacyStatus },
+                    { label: language === 'ru' ? 'Фото профиля' : 'Profile Avatar', val: privacyPhoto, set: setPrivacyPhoto },
+                    { label: language === 'ru' ? 'Последний визит' : 'Last Seen Time', val: privacyLastSeen, set: setPrivacyLastSeen },
+                    { label: language === 'ru' ? 'Статус онлайн' : 'Online Status', val: privacyOnline, set: setPrivacyOnline }
+                  ].map((field, idx) => (
+                    <div key={idx} className="flex items-center justify-between gap-1 border-b border-white/[0.02] pb-1.5 last:border-0 last:pb-0">
+                      <span className="text-slate-400 font-sans">{field.label}</span>
+                      <select 
+                        value={field.val} 
+                        onChange={(e) => field.set(e.target.value as any)}
+                        className="bg-black/40 text-slate-200 border border-white/5 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--glass-border-focus)] font-mono shrink-0 cursor-pointer"
+                      >
+                        <option value="all">{language === 'ru' ? 'Все' : 'Everyone'}</option>
+                        <option value="contacts">{language === 'ru' ? 'Контакты' : 'Contacts'}</option>
+                        <option value="nobody">{language === 'ru' ? 'Никто' : 'Nobody'}</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Join Chat by invitation code */}
+              <div className="p-3 bg-cyan-950/15 rounded-2xl border border-cyan-500/10 space-y-2 pt-2.5 pb-3">
+                <span className="block text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider">
+                  {language === 'ru' ? 'Присоединиться к группе' : 'Join chat by Invite Code'}
+                </span>
+                <div className="flex gap-1 text-xs">
+                  <input 
+                    type="text" 
+                    placeholder="invite_..."
+                    id="invite-input-field"
+                    className="flex-1 bg-black/30 text-slate-100 border border-cyan-500/10 px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-cyan-555" 
+                  />
+                  <button 
+                    onClick={async () => {
+                      const input = document.getElementById('invite-input-field') as HTMLInputElement;
+                      if (input && input.value.trim()) {
+                        try {
+                          const chatObj = await joinChatByInviteCode(input.value.trim());
+                          alert(language === 'ru' ? `Успешно вошли в: ${chatObj.title}` : `Successfully joined: ${chatObj.title}`);
+                          input.value = '';
+                        } catch (err: any) {
+                          alert(language === 'ru' ? 'Ошибка вступления: ' + err.message : 'Join error: ' + err.message);
+                        }
+                      }
+                    }}
+                    className="p-1 px-3.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-200 font-mono text-[10px] rounded-xl border border-cyan-500/30 font-semibold align-middle cursor-pointer uppercase transition duration-150 active:scale-95"
+                  >
+                    {language === 'ru' ? 'Войти' : 'Join'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -840,7 +988,21 @@ export const Sidebar: React.FC = () => {
             </button>
             <button 
               onClick={async () => {
-                await updateMyProfile(editDisplayName, editBio, editStatus);
+                await updateMyProfile(
+                  editDisplayName, 
+                  editBio, 
+                  editStatus, 
+                  undefined, 
+                  editEmojiStatus, 
+                  editPhoneNumber,
+                  {
+                    phoneNumber: privacyNumber,
+                    statusMessage: privacyStatus,
+                    photoURL: privacyPhoto,
+                    lastSeen: privacyLastSeen,
+                    onlineStatus: privacyOnline
+                  }
+                );
                 setShowSettings(false);
               }}
               className="px-4 py-2 bg-[var(--glass-accent)] hover:opacity-90 text-white font-semibold rounded-xl transition duration-150 active:scale-95"

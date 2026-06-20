@@ -40,6 +40,8 @@ import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Message } from '../types';
 import { logger } from '../lib/logger';
+import { db } from '../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const DEFAULT_STICKERS = [
   'https://api.dicebear.com/7.x/fun-emoji/svg?seed=happy',
@@ -288,7 +290,12 @@ export const ChatWindow: React.FC = () => {
     createTopic,
     closeTopic,
     initiateCall,
-    uploadProgress
+    uploadProgress,
+    selectedUserProfile,
+    setSelectedUserProfile,
+    createDirectChat,
+    addMemberToChat,
+    onlineUsers
   } = useMessenger();
 
   const { t, language } = useLanguage();
@@ -868,28 +875,43 @@ export const ChatWindow: React.FC = () => {
             <span className="text-xl leading-none">&larr;</span>
           </button>
           
-          <img src={activeChat.photoURL} alt={activeChat.title} className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover border border-slate-800" />
-          
-          <div className="min-w-0">
-            <h3 className="font-semibold text-[13px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
-            {typingUsers.length > 0 ? (
-              <span className="text-[10px] md:text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1 leading-none mt-0.5">
-                <span className="flex gap-0.5">
-                  <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div 
+            onClick={() => {
+              if (activeChat.type === 'direct') {
+                const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
+                const partnerProfile = globalUsers.find(u => u.uid === partnerId);
+                if (partnerProfile) {
+                  setSelectedUserProfile(partnerProfile);
+                }
+              } else {
+                setIsRightPanelOpen(true);
+              }
+            }}
+            className="flex items-center gap-2 md:gap-3.5 min-w-0 cursor-pointer hover:opacity-85 transition"
+          >
+            <img src={activeChat.photoURL} alt={activeChat.title} className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover border border-slate-800" />
+            
+            <div className="min-w-0">
+              <h3 className="font-semibold text-[13px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
+              {typingUsers.length > 0 ? (
+                <span className="text-[10px] md:text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1 leading-none mt-0.5">
+                  <span className="flex gap-0.5">
+                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                  {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
                 </span>
-                {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
-              </span>
-            ) : (
-              <span className="text-[10px] md:text-[11px] text-slate-400 flex items-center gap-1 font-sans mt-0.5 leading-none">
-                <span className="capitalize text-cyan-500/80 font-medium">
-                  {activeChat.type === 'direct' ? (language === 'ru' ? 'Личный' : 'Direct') : activeChat.type === 'group' ? (language === 'ru' ? 'Группа' : 'Group') : (language === 'ru' ? 'Канал' : 'Channel')}
-                </span> 
-                <span>&bull;</span> 
-                <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
-              </span>
-            )}
+              ) : (
+                <span className="text-[10px] md:text-[11px] text-slate-400 flex items-center gap-1 font-sans mt-0.5 leading-none">
+                  <span className="capitalize text-cyan-500/80 font-medium">
+                    {activeChat.type === 'direct' ? (language === 'ru' ? 'Личный' : 'Direct') : activeChat.type === 'group' ? (language === 'ru' ? 'Группа' : 'Group') : (language === 'ru' ? 'Канал' : 'Channel')}
+                  </span> 
+                  <span>&bull;</span> 
+                  <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1083,7 +1105,24 @@ export const ChatWindow: React.FC = () => {
                 >
                   {/* Left Avatar for other users (Hidden on consecutive piles) */}
                   {!isMe && (
-                    <div className="w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0">
+                    <div 
+                      onClick={() => {
+                        const profile = globalUsers.find(u => u.uid === msg.senderId);
+                        if (profile) {
+                          setSelectedUserProfile(profile);
+                        } else {
+                          setSelectedUserProfile({
+                            uid: msg.senderId,
+                            displayName: msg.senderName,
+                            photoURL: msg.senderPhotoURL,
+                            username: msg.senderName.toLowerCase().replace(/[^a-z0-9]/g, ''),
+                            bio: 'Hello, I am using VI Messenger!',
+                            createdAt: msg.createdAt
+                          } as any);
+                        }
+                      }}
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0 ${!isConsecutive ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                    >
                       {!isConsecutive ? (
                         <img src={msg.senderPhotoURL} alt={msg.senderName} className="w-full h-full object-cover border border-slate-900 shadow" />
                       ) : (
@@ -1945,6 +1984,139 @@ export const ChatWindow: React.FC = () => {
             >
               🚀 {language === 'ru' ? 'Выпустить опрос в эфир' : 'Publish interactive poll'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Selected User Full Profile Modal Viewer */}
+      {selectedUserProfile && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="w-full max-w-sm glass-panel text-slate-100 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col relative animate-scale-up" style={{ background: 'var(--glass-sidebar-bg)' }}>
+            
+            {/* Upper cover area */}
+            <div className="h-24 bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border-b border-white/5 relative shrink-0">
+              <button 
+                onClick={() => setSelectedUserProfile(null)}
+                className="absolute top-3.5 right-3.5 p-1 bg-black/35 hover:bg-black/55 text-slate-350 hover:text-white rounded-full transition cursor-pointer"
+                title={language === 'ru' ? 'Закрыть' : 'Close'}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Avatar overlay */}
+            <div className="flex flex-col items-center px-6 -mt-12 pb-6 relative">
+              <div className="relative">
+                <img 
+                  src={selectedUserProfile.photoURL} 
+                  alt={selectedUserProfile.displayName} 
+                  className="w-24 h-24 rounded-full border-4 border-slate-950/40 object-cover shadow-2xl relative bg-slate-950" 
+                />
+                {selectedUserProfile.emojiStatus && (
+                  <span className="absolute bottom-0 right-0 w-7 h-7 bg-black/75 border border-white/15 rounded-full flex items-center justify-center text-xs shadow-lg animate-bounce" style={{ animationDuration: '3s' }}>
+                    {selectedUserProfile.emojiStatus}
+                  </span>
+                )}
+              </div>
+
+              <div className="font-semibold text-lg text-slate-100 mt-3 text-center flex items-center justify-center gap-1.5 leading-tight">
+                {selectedUserProfile.displayName}
+              </div>
+              <div className="text-xs font-mono text-cyan-400 mt-1">@{selectedUserProfile.username}</div>
+              
+              {/* Online indicator */}
+              <div className="mt-2.5 flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${onlineUsers[selectedUserProfile.uid] === 'online' ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+                  {onlineUsers[selectedUserProfile.uid] === 'online' 
+                    ? (language === 'ru' ? 'Онлайн' : 'Online') 
+                    : (selectedUserProfile.lastSeen 
+                        ? `${language === 'ru' ? 'Был(а) в сети:' : 'Last Seen:'} ${new Date(selectedUserProfile.lastSeen).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` 
+                        : (language === 'ru' ? 'Офлайн' : 'Offline'))}
+                </span>
+              </div>
+
+              {/* Status & Biography cards */}
+              <div className="w-full mt-5 space-y-3.5 text-xs">
+                {selectedUserProfile.statusMessage && (
+                  <div className="p-3 bg-black/15 rounded-2xl border border-white/5">
+                    <span className="block text-[9px] font-mono text-slate-405 uppercase tracking-wider mb-1">{language === 'ru' ? 'Текущий статус' : 'Current Status'}</span>
+                    <span className="text-slate-200">{selectedUserProfile.statusMessage}</span>
+                  </div>
+                )}
+
+                <div className="p-3 bg-black/15 rounded-2xl border border-white/5 space-y-2">
+                  <div>
+                    <span className="block text-[9px] font-mono text-slate-405 uppercase tracking-wider mb-0.5">{language === 'ru' ? 'О себе (Bio)' : 'Biography'}</span>
+                    <span className="text-slate-305 italic">{selectedUserProfile.bio || '—'}</span>
+                  </div>
+                  
+                  {/* Subject to privacy settings (If they don't hide it) */}
+                  {selectedUserProfile.phoneNumber && selectedUserProfile.privacySettings?.phoneNumber !== 'nobody' && (
+                    <div className="pt-2 border-t border-white/[0.03] flex justify-between items-center">
+                      <span className="text-slate-450">{language === 'ru' ? 'Телефон' : 'Phone'}</span>
+                      <span className="font-mono text-slate-200">{selectedUserProfile.phoneNumber}</span>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-white/[0.03] flex justify-between items-center text-[10px] font-mono text-slate-500">
+                    <span>{language === 'ru' ? 'Регистрация' : 'Registered'}</span>
+                    <span>{selectedUserProfile.createdAt ? new Date(selectedUserProfile.createdAt).toLocaleDateString() : 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action operations buttons */}
+              <div className="w-full grid grid-cols-2 gap-2 mt-5 text-xs font-mono">
+                {selectedUserProfile.uid !== currentUser?.uid ? (
+                  <>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const directChat = await createDirectChat(selectedUserProfile);
+                          setActiveChat(directChat);
+                          setSelectedUserProfile(null);
+                        } catch (err: any) {
+                          alert(language === 'ru' ? 'Ошибка начала чата: ' + err.message : 'Error starting chat: ' + err.message);
+                        }
+                      }}
+                      className="py-2.5 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer"
+                    >
+                      💬 {language === 'ru' ? 'Чат' : 'Message'}
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        try {
+                          await addContactByUsername(selectedUserProfile.username);
+                          alert(language === 'ru' ? 'Пользователь добавлен в контакты!' : 'User added to contacts!');
+                          // Toggle component refresh
+                          const refreshedProfileSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', selectedUserProfile.uid)));
+                          if (!refreshedProfileSnap.empty) {
+                            setSelectedUserProfile(refreshedProfileSnap.docs[0].data() as UserProfile);
+                          }
+                        } catch (err: any) {
+                          alert(err.message);
+                        }
+                      }}
+                      disabled={userProfile?.contacts?.includes(selectedUserProfile.uid)}
+                      className={`py-2.5 rounded-xl border font-bold transition duration-150 active:scale-95 text-center cursor-pointer ${
+                        userProfile?.contacts?.includes(selectedUserProfile.uid)
+                          ? 'bg-transparent border-white/5 text-slate-500 cursor-not-allowed'
+                          : 'bg-black/25 hover:bg-black/35 border-white/10 text-slate-300'
+                      }`}
+                    >
+                      👤 {userProfile?.contacts?.includes(selectedUserProfile.uid) ? (language === 'ru' ? 'В контактах' : 'Is Contact') : (language === 'ru' ? 'В контакты' : 'Add Contact')}
+                    </button>
+                  </>
+                ) : (
+                  <div className="col-span-2 text-center text-slate-500 text-[10px] uppercase font-mono italic p-2 tracking-wider bg-black/10 rounded-xl border border-white/5">
+                    {language === 'ru' ? 'Это ваш публичный профиль' : 'This is your public profile'}
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
       )}

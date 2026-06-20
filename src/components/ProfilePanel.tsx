@@ -37,7 +37,10 @@ export const ProfilePanel: React.FC = () => {
     blockedUsersList, 
     toggleBlockUser,
     onlineUsers,
-    deleteChat
+    deleteChat,
+    setSelectedUserProfile,
+    addMemberToChat,
+    contactsList
   } = useMessenger();
 
   // States
@@ -207,6 +210,79 @@ export const ProfilePanel: React.FC = () => {
               )}
             </div>
 
+            {/* Invite link & Add participant section */}
+            {!isDirect && (
+              <div className="space-y-3.5">
+                {/* Invite link snippet */}
+                <div className="p-3.5 bg-cyan-950/20 border border-cyan-500/10 rounded-xl space-y-1.5">
+                  <span className="text-[10px] font-mono uppercase text-cyan-400 block tracking-wider font-semibold">GROUP INVITATION LINK</span>
+                  <div className="flex items-center justify-between gap-1 text-xs">
+                    <input 
+                      type="text" 
+                      readOnly 
+                      value={`invite_${activeChat.id}`} 
+                      className="bg-black/35 text-slate-300 font-mono text-[11px] border border-white/5 rounded-lg px-2.5 py-1.5 select-all flex-1 min-w-0" 
+                    />
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(`invite_${activeChat.id}`);
+                        alert('GROUP INVITATION CODE copied to clipboard! Share it with others to allow them to join.');
+                      }}
+                      className="px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-300 font-mono border border-cyan-500/20 text-[10px] rounded-lg transition active:scale-95 cursor-pointer uppercase font-semibold"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                {/* Add participant selector dropdown */}
+                {/* Find contacts who are not already in this chat */}
+                {(() => {
+                  const nonMemberContacts = contactsList.filter(
+                    contact => !activeChat.members?.includes(contact.uid)
+                  );
+                  
+                  if (nonMemberContacts.length === 0) return null;
+                  
+                  return (
+                    <div className="p-3.5 bg-white/[0.02] border border-white/5 rounded-xl space-y-2">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 block tracking-wider font-semibold">ADD PARTICIPANT</span>
+                      <div className="flex gap-2">
+                        <select 
+                          id="add-member-select-elem"
+                          className="flex-1 bg-black/40 text-slate-200 border border-white/5 text-[11px] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[var(--glass-border-focus)] font-sans cursor-pointer min-w-0"
+                        >
+                          <option value="">-- Choose contact to add --</option>
+                          {nonMemberContacts.map(c => (
+                            <option key={c.uid} value={c.uid}>
+                              {c.displayName} (@{c.username})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={async () => {
+                            const select = document.getElementById('add-member-select-elem') as HTMLSelectElement;
+                            if (select && select.value) {
+                              try {
+                                await addMemberToChat(activeChat.id, select.value);
+                                alert('Member added successfully!');
+                                select.value = '';
+                              } catch (err: any) {
+                                alert('Error adding member: ' + err.message);
+                              }
+                            }
+                          }}
+                          className="p-1 px-3 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-mono text-[10.5px] rounded-lg font-bold cursor-pointer uppercase transition active:scale-95"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* List of chat participants */}
             {!isDirect && (
               <div className="space-y-2">
@@ -221,10 +297,13 @@ export const ProfilePanel: React.FC = () => {
                     
                     return (
                       <div key={user.uid} className="flex items-center justify-between p-2.5 text-xs">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div 
+                          onClick={() => setSelectedUserProfile(user)}
+                          className="flex items-center gap-2 min-w-0 cursor-pointer hover:opacity-80 transition"
+                        >
                           <img src={user.photoURL} alt={user.displayName} className="w-6 h-6 rounded-full object-cover shrink-0" />
                           <div className="min-w-0">
-                            <span className="font-medium text-slate-300 truncate block">{user.displayName}</span>
+                            <span className="font-medium text-slate-300 truncate block hover:underline">{user.displayName}</span>
                             <span className="text-[10px] text-slate-500 font-mono block">@{user.username}</span>
                           </div>
                         </div>
