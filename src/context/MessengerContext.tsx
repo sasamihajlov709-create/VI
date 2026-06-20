@@ -46,7 +46,8 @@ import {
   Message, 
   CallSession, 
   Story, 
-  ChatFolder 
+  ChatFolder,
+  ActiveSession
 } from '../types';
 
 interface MessengerContextType {
@@ -89,16 +90,6 @@ interface MessengerContextType {
   sortFolders: (folders: ChatFolder[]) => Promise<void>;
   getRecommendedUsers: () => Promise<UserProfile[]>;
   terminateSession: (sessionId: string) => Promise<void>;
-  banUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
-  unbanUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
-  muteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
-  unmuteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
-  promoteUser: (chatId: string, targetUid: string, targetName: string, role: 'admin' | 'moderator') => Promise<void>;
-  demoteUser: (chatId: string, targetUid: string, targetName: string) => Promise<void>;
-  joinChat: (chatId: string) => Promise<void>;
-  leaveChat: (chatId: string) => Promise<void>;
-  incrementMessageView: (chatId: string, messageId: string) => Promise<void>;
-  getOrCreateSavedMessagesChat: () => Promise<Chat>;
   
   // Chat actions
   createDirectChat: (targetUser: UserProfile) => Promise<Chat>;
@@ -1705,6 +1696,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       resetPassword,
       logout,
       updateMyProfile,
+      uploadAvatar,
+      deleteAvatar,
+      updateFolder,
+      sortFolders,
+      getRecommendedUsers,
+      terminateSession,
       
       createDirectChat,
       createGroupOrChannel,

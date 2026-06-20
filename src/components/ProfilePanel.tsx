@@ -20,7 +20,8 @@ import {
   LogOut, 
   Users, 
   Megaphone,
-  Network
+  Network,
+  Settings
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { doc, updateDoc, arrayRemove, arrayUnion, query, collection, where, getDocs, setDoc, limit } from 'firebase/firestore';
@@ -52,6 +53,34 @@ export const ProfilePanel: React.FC = () => {
   // Diagnostic states
   const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [offlineQueuedEvents, setOfflineQueuedEvents] = useState(0);
+
+  // Group settings editor states
+  const [groupTitle, setGroupTitle] = useState('');
+  const [groupDesc, setGroupDesc] = useState('');
+  const [groupRulesText, setGroupRulesText] = useState('');
+  const [groupWelcomeMsg, setGroupWelcomeMsg] = useState('');
+  const [groupSlowMode, setGroupSlowMode] = useState(0);
+  const [groupPhoto, setGroupPhoto] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (activeChat) {
+      setGroupTitle(activeChat.title || '');
+      setGroupDesc(activeChat.description || '');
+      setGroupRulesText(activeChat.rules || '');
+      setGroupWelcomeMsg(activeChat.welcomeMessage || '');
+      setGroupSlowMode(activeChat.slowModeSeconds || 0);
+      setGroupPhoto(activeChat.photoURL || '');
+    }
+  }, [
+    activeChat?.id, 
+    activeChat?.title, 
+    activeChat?.description, 
+    activeChat?.rules, 
+    activeChat?.welcomeMessage, 
+    activeChat?.slowModeSeconds, 
+    activeChat?.photoURL
+  ]);
 
   // Load chat participants details
   useEffect(() => {
@@ -134,7 +163,29 @@ export const ProfilePanel: React.FC = () => {
     setTimeout(() => setReportSuccess(false), 3000);
   };
 
+  const handleSaveGroupSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !activeChat) return;
+    try {
+      await updateDoc(doc(db, 'chats', activeChat.id), {
+        title: groupTitle.trim(),
+        description: groupDesc.trim(),
+        rules: groupRulesText.trim(),
+        welcomeMessage: groupWelcomeMsg.trim(),
+        slowModeSeconds: Number(groupSlowMode),
+        photoURL: groupPhoto.trim() || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(groupTitle)}`,
+        updatedAt: Date.now()
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      alert("Error saving group settings: " + err.message);
+    }
+  };
+
   const isDirect = activeChat.type === 'direct';
+  const isGroupOrChannel = activeChat.type === 'group' || activeChat.type === 'channel';
+  const isAdmin = currentUser && (activeChat.creatorId === currentUser.uid || activeChat.admins?.includes(currentUser.uid));
   const directTargetUser = chatMembersDetails.find(u => u.uid !== currentUser?.uid);
 
   return (
@@ -391,6 +442,99 @@ export const ProfilePanel: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Space Configuration form */}
+            {isGroupOrChannel && isAdmin && (
+              <div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-teal-400 flex items-center gap-1.5 mb-2">
+                  <Settings className="w-3.5 h-3.5 animate-spin-slow" />
+                  Space Configuration
+                </span>
+                <form onSubmit={handleSaveGroupSettings} className="bg-slate-900/30 p-3 rounded-xl border border-slate-800 space-y-3">
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Title</label>
+                    <input 
+                      type="text" 
+                      value={groupTitle}
+                      onChange={(e) => setGroupTitle(e.target.value)}
+                      placeholder="Title of group/channel"
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Description</label>
+                    <textarea 
+                      value={groupDesc}
+                      onChange={(e) => setGroupDesc(e.target.value)}
+                      placeholder="Biographies/purpose details..."
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500 min-h-[50px] resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Rules / Guidelines</label>
+                    <textarea 
+                      value={groupRulesText}
+                      onChange={(e) => setGroupRulesText(e.target.value)}
+                      placeholder="Community behavior rules..."
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500 min-h-[50px] resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Welcome Message</label>
+                    <textarea 
+                      value={groupWelcomeMsg}
+                      onChange={(e) => setGroupWelcomeMsg(e.target.value)}
+                      placeholder="Introductory welcome speech..."
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500 min-h-[50px] resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Photo / Icon URL</label>
+                    <input 
+                      type="text" 
+                      value={groupPhoto}
+                      onChange={(e) => setGroupPhoto(e.target.value)}
+                      placeholder="HTTPS link to visual asset"
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500 font-mono text-[10px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] text-slate-500 font-mono uppercase mb-1">Slow Mode Countdown</label>
+                    <select 
+                      value={groupSlowMode}
+                      onChange={(e) => setGroupSlowMode(Number(e.target.value))}
+                      className="w-full bg-slate-950/60 text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
+                    >
+                      <option value={0}>Disabled</option>
+                      <option value={5}>5 seconds</option>
+                      <option value={10}>10 seconds</option>
+                      <option value={15}>15 seconds</option>
+                      <option value={30}>30 seconds</option>
+                      <option value={60}>1 minute</option>
+                      <option value={300}>5 minutes</option>
+                    </select>
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="w-full py-2 bg-teal-600/10 hover:bg-teal-600/20 text-teal-400 font-bold uppercase font-mono tracking-wider border border-teal-500/20 rounded-lg text-[9px] cursor-pointer transition-all"
+                  >
+                    Save configuration matrix
+                  </button>
+
+                  {saveSuccess && (
+                    <span className="text-[9px] text-emerald-400 block font-medium mt-1 text-center font-mono animate-fade-in">
+                      Configuration locked successfully.
+                    </span>
+                  )}
+                </form>
+              </div>
+            )}
 
             {/* Moderation / Report Form widget */}
             <div>

@@ -34,11 +34,12 @@ import {
   Search,
   MessageSquare,
   Lock,
+  Clock,
   Square
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Message } from '../types';
+import { Message, UserProfile } from '../types';
 import { logger } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -273,6 +274,8 @@ export const ChatWindow: React.FC = () => {
     userProfile,
     activeChat, 
     setActiveChat,
+    isRightPanelOpen,
+    setIsRightPanelOpen,
     messages, 
     globalUsers,
     sendTextMessage, 
@@ -295,6 +298,7 @@ export const ChatWindow: React.FC = () => {
     setSelectedUserProfile,
     createDirectChat,
     addMemberToChat,
+    addContactByUsername,
     onlineUsers
   } = useMessenger();
 
@@ -363,6 +367,41 @@ export const ChatWindow: React.FC = () => {
   // File Upload Draft tracker
   const [selectedDraftFile, setSelectedDraftFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // Slow Mode state & active cooldown countdown
+  const myLastMessage = useMemo(() => {
+    if (!currentUser || !messages || !activeChat) return null;
+    const chatMsgs = messages.filter(m => m.chatId === activeChat.id && m.senderId === currentUser.uid);
+    if (chatMsgs.length === 0) return null;
+    return chatMsgs.reduce((latest, current) => current.createdAt > latest.createdAt ? current : latest, chatMsgs[0]);
+  }, [messages, activeChat?.id, currentUser?.uid]);
+
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!activeChat || !activeChat.slowModeSeconds || !myLastMessage || !currentUser) {
+      setCooldownRemaining(0);
+      return;
+    }
+    
+    // Admins and Creator are immune to slowMode
+    const isAdmin = activeChat.creatorId === currentUser.uid || activeChat.admins?.includes(currentUser.uid);
+    if (isAdmin) {
+      setCooldownRemaining(0);
+      return;
+    }
+
+    const calcCooldown = () => {
+      const elapsed = Date.now() - myLastMessage.createdAt;
+      const totalCooldownMs = activeChat.slowModeSeconds! * 1000;
+      const remaining = Math.max(0, Math.ceil((totalCooldownMs - elapsed) / 1000));
+      setCooldownRemaining(remaining);
+    };
+
+    calcCooldown();
+    const timer = setInterval(calcCooldown, 500);
+    return () => clearInterval(timer);
+  }, [activeChat?.id, activeChat?.slowModeSeconds, myLastMessage?.createdAt, currentUser?.uid]);
 
   // Filter messages based on views (search, scheduler queue, forum topics)
   const visibleMessages = useMemo(() => {
@@ -458,6 +497,10 @@ export const ChatWindow: React.FC = () => {
   };
 
   const startRecording = async (clientX?: number, clientY?: number) => {
+    if (cooldownRemaining > 0) {
+      alert(language === 'ru' ? `Медленный режим активен. Подождите ${cooldownRemaining}с.` : `Slow mode is active. Please wait ${cooldownRemaining}s.`);
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -1846,6 +1889,7 @@ export const ChatWindow: React.FC = () => {
                   ref={inputRef}
                   type="text" 
                   value={inputText}
+                  disabled={cooldownRemaining > 0}
                   onChange={(e) => {
                     setInputText(e.target.value);
                     if (activeChat) {
@@ -1859,15 +1903,22 @@ export const ChatWindow: React.FC = () => {
                       e.preventDefault();
                     }
                   }}
-                  placeholder={editTarget ? (language === 'ru' ? "Изменить..." : "Change text...") : (language === 'ru' ? "Cообщение..." : "Message...")}
-                  className="flex-1 bg-transparent text-slate-100 text-xs md:text-sm focus:outline-none placeholder-slate-650 min-h-[22px] max-h-[100px]"
+                  placeholder={
+                    cooldownRemaining > 0 
+                      ? (language === 'ru' ? `Медленный режим: Подождите ${cooldownRemaining}с...` : `Slow Mode: Wait ${cooldownRemaining}s...`)
+                      : editTarget 
+                        ? (language === 'ru' ? "Изменить..." : "Change text...") 
+                        : (language === 'ru' ? "Cообщение..." : "Message...")
+                  }
+                  className="flex-1 bg-transparent text-slate-100 text-xs md:text-sm focus:outline-none placeholder-slate-650 min-h-[22px] max-h-[100px] disabled:opacity-50"
                 />
 
                 {/* 3. Dropdown trigger action menu button and File Picker */}
                 <button 
                   type="button"
+                  disabled={cooldownRemaining > 0}
                   onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
-                  className={`hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0 ${showAttachmentDropdown ? 'text-[var(--glass-accent)]' : 'text-slate-400'}`}
+                  className={`hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0 disabled:opacity-30 ${showAttachmentDropdown ? 'text-[var(--glass-accent)]' : 'text-slate-400'}`}
                   title={language === 'ru' ? 'Прикрепить файл или действие' : 'Attachment & actions'}
                 >
                   <Paperclip className="w-4.5 h-4.5" />
@@ -1878,7 +1929,16 @@ export const ChatWindow: React.FC = () => {
             {/* Flight Send command or voice message recorder key (adjacent round button) */}
             {!voicePreviewBlob && !isRecording && (
               <div className="shrink-0 animate-fade-in">
-                {inputText.trim() || selectedDraftFile ? (
+                {cooldownRemaining > 0 ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="p-2 bg-slate-900/40 border border-slate-800/80 rounded-full text-amber-500 shrink-0 transition-all shadow-md h-9 w-9 flex items-center justify-center"
+                    title={language === 'ru' ? `Медленный режим: Подождите еще ${cooldownRemaining}с` : `Slow Mode: Wait ${cooldownRemaining}s`}
+                  >
+                    <Clock className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
+                  </button>
+                ) : inputText.trim() || selectedDraftFile ? (
                   <button 
                     type="submit" 
                     disabled={!inputText.trim() && !selectedDraftFile}

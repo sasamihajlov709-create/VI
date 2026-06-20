@@ -23,6 +23,7 @@ import {
 import { useMessenger } from '../context/MessengerContext';
 import { doc, updateDoc, onSnapshot, arrayUnion } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { logger } from '../lib/logger';
 
 export const CallScreen: React.FC = () => {
   const { 
