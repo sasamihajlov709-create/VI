@@ -95,5 +95,15 @@ service cloud.firestore {
       allow create: if isAuth();
       allow read, update, delete: if false; 
     }
+
+    // --- Invites ---
+    match /invites/{inviteId} {
+      allow read, write: if isAuth();
+    }
+
+    // --- Join Requests ---
+    match /joinRequests/{requestId} {
+      allow read, write: if isAuth();
+    }
   }
 }

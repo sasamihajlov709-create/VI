@@ -140,7 +140,7 @@ const MessengerContent: React.FC = () => {
           <ChatWindow />
 
           {/* 3. Details right column metadata (Toggleable desktop drawer) */}
-          {activeChat && (
+          {activeChat && isRightPanelOpen && (
             <div className="hidden lg:block shrink-0">
               <ProfilePanel />
             </div>

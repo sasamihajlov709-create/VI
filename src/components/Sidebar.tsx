@@ -21,9 +21,17 @@ import {
   Volume2, 
   VolumeX, 
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  Edit2,
+  Trash2,
+  Sliders,
+  Sparkles,
   ShieldAlert,
+  Folder,
   FolderOpen,
-  Globe
+  Globe,
+  Bookmark
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -55,6 +63,9 @@ export const Sidebar: React.FC = () => {
     addContactByUsername,
     contactsList,
     createFolder,
+    updateFolder,
+    deleteFolder,
+    sortFolders,
     activeFolder,
     setActiveFolder,
     onlineUsers,
@@ -72,6 +83,8 @@ export const Sidebar: React.FC = () => {
   
   // Search state
   const [sidebarCtxMenu, setSidebarCtxMenu] = useState<string | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartRef = useRef<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
   const [usernameInput, setUsernameInput] = useState('');
@@ -88,6 +101,7 @@ export const Sidebar: React.FC = () => {
   // Folder creation form
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderChats, setNewFolderChats] = useState<string[]>([]);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
 
   // Story state
   const [activeStoryView, setActiveStoryView] = useState<UserProfile | null>(null);
@@ -103,6 +117,13 @@ export const Sidebar: React.FC = () => {
   const [privacyPhoto, setPrivacyPhoto] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.photoURL || 'all');
   const [privacyLastSeen, setPrivacyLastSeen] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.lastSeen || 'all');
   const [privacyOnline, setPrivacyOnline] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.onlineStatus || 'all');
+  
+  // Settings Tab and Device/UX-specific preference states
+  const [settingsTab, setSettingsTab] = useState<'account' | 'chats' | 'notifications' | 'privacy' | 'data'>('account');
+  const [textSizeSelection, setTextSizeSelection] = useState<string>(() => localStorage.getItem('vi-chat-text-size') || 'sm');
+  const [wallpaperSelection, setWallpaperSelection] = useState<string>(() => localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => localStorage.getItem('vi-sound-notifications') !== 'false');
+  const [vibeEnabled, setVibeEnabled] = useState<boolean>(() => localStorage.getItem('vi-vibe-notifications') !== 'false');
   
   // Keep states in sync when userProfile updates in real-time
   React.useEffect(() => {
@@ -179,10 +200,47 @@ export const Sidebar: React.FC = () => {
   const handleCreateFolderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    await createFolder(newFolderName, 'FolderOpen', newFolderChats);
+    if (editingFolderId && editingFolderId !== 'new') {
+      await updateFolder(editingFolderId, newFolderName, 'FolderOpen', newFolderChats);
+    } else {
+      await createFolder(newFolderName, 'FolderOpen', newFolderChats);
+    }
     setNewFolderName('');
     setNewFolderChats([]);
+    setEditingFolderId(null);
     setShowFolderModal(false);
+  };
+
+  const handleCreatePreset = async (presetType: 'work' | 'channels' | 'unread') => {
+    let folderName = '';
+    let includedChatIds: string[] = [];
+    
+    if (presetType === 'work') {
+      folderName = language === 'ru' ? 'Работа' : 'Work';
+      includedChatIds = chats.filter(c => c.type === 'group' || c.type === 'direct').map(c => c.id);
+    } else if (presetType === 'channels') {
+      folderName = language === 'ru' ? 'Каналы' : 'Channels';
+      includedChatIds = chats.filter(c => c.type === 'channel').map(c => c.id);
+    } else if (presetType === 'unread') {
+      folderName = language === 'ru' ? 'Непрочитанные' : 'Unread';
+      includedChatIds = chats.filter(c => currentUser && c.unreadCounts && (c.unreadCounts[currentUser.uid] || 0) > 0).map(c => c.id);
+    }
+    
+    if (folderName) {
+      await createFolder(folderName, 'FolderOpen', includedChatIds);
+    }
+  };
+
+  const handleMoveFolder = async (idx: number, direction: 'up' | 'down') => {
+    const list = [...(userProfile?.folders || [])];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+    
+    const temp = list[idx];
+    list[idx] = list[targetIdx];
+    list[targetIdx] = temp;
+    
+    await sortFolders(list);
   };
 
   // Handle custom stories file uploads
@@ -198,6 +256,56 @@ export const Sidebar: React.FC = () => {
         alert(language === 'ru' ? "Не удалось загрузить историю." : "Failed to upload story.");
       }
     }
+  };
+
+  const handlePullTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.currentTarget.scrollTop === 0) {
+      pullStartRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handlePullTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (pullStartRef.current === null) return;
+    const currentY = e.touches[0].clientY;
+    const diff = currentY - pullStartRef.current;
+    if (diff > 0) {
+      setPullDistance(Math.min(diff * 0.45, 95));
+      if (e.cancelable) e.preventDefault();
+    }
+  };
+
+  const handlePullTouchEnd = () => {
+    if (pullStartRef.current === null) return;
+    if (pullDistance >= 65) {
+      setActiveFolder('archived');
+      if ('vibrate' in navigator) navigator.vibrate(20);
+    }
+    pullStartRef.current = null;
+    setPullDistance(0);
+  };
+
+  const handlePullMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.currentTarget.scrollTop === 0) {
+      pullStartRef.current = e.clientY;
+    }
+  };
+
+  const handlePullMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (pullStartRef.current === null) return;
+    const diff = e.clientY - pullStartRef.current;
+    if (diff > 0) {
+      setPullDistance(Math.min(diff * 0.45, 95));
+    }
+  };
+
+  const handlePullMouseUp = () => {
+    if (pullStartRef.current === null) return;
+    if (pullDistance >= 65) {
+      setActiveFolder('archived');
+      if ('vibrate' in navigator) navigator.vibrate(20);
+    }
+    pullStartRef.current = null;
+    setPullDistance(0);
   };
 
   // Dynamic Filtering of Chats based on Navigation Drawer Folder selection and searching
@@ -292,6 +400,18 @@ export const Sidebar: React.FC = () => {
               onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
             >
               {language === 'en' ? 'RU' : 'EN'}
+            </button>
+
+            <button 
+              className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 transition-all cursor-pointer"
+              title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
+              onClick={async () => {
+                if (userProfile) {
+                  await createDirectChat(userProfile);
+                }
+              }}
+            >
+              <Bookmark className="w-5 h-5" />
             </button>
 
             <button 
@@ -451,8 +571,37 @@ export const Sidebar: React.FC = () => {
         })}
       </div>
 
-      {/* Main Chat List view (Virtualized density) */}
-      <div ref={listContainerRef} className="flex-1 overflow-y-auto relative" onClick={() => setSidebarCtxMenu(null)}>
+      {/* Main Chat List view (Virtualized density and pull-down gesture support) */}
+      <div 
+        ref={listContainerRef} 
+        className="flex-1 overflow-y-auto relative" 
+        onClick={() => setSidebarCtxMenu(null)}
+        onTouchStart={handlePullTouchStart}
+        onTouchMove={handlePullTouchMove}
+        onTouchEnd={handlePullTouchEnd}
+        onMouseDown={handlePullMouseDown}
+        onMouseMove={handlePullMouseMove}
+        onMouseUp={handlePullMouseUp}
+        onMouseLeave={handlePullMouseUp}
+      >
+        {/* Dynamic Pull-to-reveal visual feedback banner */}
+        {pullDistance > 0 && (
+          <div 
+            style={{ height: `${pullDistance}px` }} 
+            className="w-full flex items-center justify-center bg-zinc-950/20 text-xs border-b border-white/[0.02] overflow-hidden text-slate-400 select-none shrink-0"
+          >
+            <div className="flex items-center gap-2 animate-pulse font-mono tracking-wider">
+              <Archive className={`w-4 h-4 text-cyan-400 transition-transform ${pullDistance >= 65 ? 'scale-125 rotate-6 text-amber-500' : ''}`} />
+              <span className="text-[10px] font-bold uppercase">
+                {pullDistance >= 65 
+                  ? (language === 'ru' ? 'Отпустите для открытия Архива' : 'Release to open Archive')
+                  : (language === 'ru' ? 'Потяните для открытия Архива' : 'Pull down to open Archive')
+                }
+              </span>
+            </div>
+          </div>
+        )}
+
         {filteredChats.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500 h-2/3">
             <MessageSquare className="w-10 h-10 mb-2 opacity-30" />
@@ -481,20 +630,46 @@ export const Sidebar: React.FC = () => {
                     height: item.size,
                     transform: `translateY(${item.start}px)`,
                   }}
-                  onClick={() => setActiveChat(chat)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setSidebarCtxMenu(chat.id);
-                  }}
-                  className={`flex items-center gap-3 border-b border-white/[0.04] cursor-pointer select-none transition-all duration-200 relative ${isActive ? 'bg-white/[0.07] border-l-2 border-[var(--glass-accent)] px-5 py-4' : 'hover:bg-white/[0.03] px-5 py-4'}`}
+                  className="relative border-b border-white/[0.04] overflow-hidden"
                 >
-                  {/* Context Menu Overlay */}
-                  {sidebarCtxMenu === chat.id && (
-                    <div 
-                      className="absolute inset-0 z-50 bg-[#0A0A0A]/95 backdrop-blur-md flex items-center justify-around px-4 rounded-xl shadow-2xl animate-fade-in-up"
-                      onClick={(e) => { e.stopPropagation(); setSidebarCtxMenu(null); }}
-                      onMouseLeave={() => setSidebarCtxMenu(null)}
-                    >
+                  {/* Swipe Background Reveal Layer */}
+                  <div className="absolute inset-0 flex justify-between items-center px-6 pointer-events-none bg-slate-800/20">
+                     <div className="flex items-center text-cyan-500 gap-2">
+                        <MessageSquare className="w-5 h-5 opacity-80" />
+                     </div>
+                     <div className="flex items-center text-amber-500 gap-2">
+                        <Archive className="w-5 h-5 opacity-80" />
+                     </div>
+                  </div>
+
+                  <motion.div
+                    drag="x"
+                    dragDirectionLock
+                    dragConstraints={{ left: 0, right: 0 }}
+                    dragElastic={{ left: 0.2, right: 0.2 }}
+                    onDragEnd={(e, info) => {
+                      if (info.offset.x < -60) {
+                         toggleArchiveChat(chat.id);
+                         if ('vibrate' in navigator) navigator.vibrate(20);
+                      } else if (info.offset.x > 60) {
+                         setActiveChat(chat);
+                         if ('vibrate' in navigator) navigator.vibrate(20);
+                      }
+                    }}
+                    onClick={() => setActiveChat(chat)}
+                    onContextMenu={(e: React.MouseEvent) => {
+                      e.preventDefault();
+                      setSidebarCtxMenu(chat.id);
+                    }}
+                    className={`flex h-full w-full items-center gap-3 cursor-pointer select-none relative bg-[#121215] ${isActive ? 'bg-white/[0.07] border-l-2 border-[var(--glass-accent)] px-5' : 'hover:bg-white/[0.03] px-5 py-2'}`}
+                  >
+                    {/* Context Menu Overlay */}
+                    {sidebarCtxMenu === chat.id && (
+                      <div 
+                        className="absolute inset-0 z-50 bg-[#0A0A0A]/95 backdrop-blur-md flex items-center justify-around px-4 shadow-2xl animate-fade-in-up"
+                        onClick={(e) => { e.stopPropagation(); setSidebarCtxMenu(null); }}
+                        onMouseLeave={() => setSidebarCtxMenu(null)}
+                      >
                       <button 
                         onClick={(e) => { e.stopPropagation(); togglePinChat(chat.id); setSidebarCtxMenu(null); }} 
                         className="flex flex-col items-center gap-1.5 p-2 hover:bg-slate-800 rounded-xl transition text-cyan-400"
@@ -580,6 +755,7 @@ export const Sidebar: React.FC = () => {
                       </span>
                     )}
                   </div>
+                  </motion.div>
                 </div>
               );
             })}
@@ -702,52 +878,233 @@ export const Sidebar: React.FC = () => {
             exit={{ opacity: 0, scale: 0.95 }}
             className="w-full max-w-md glass-panel rounded-2xl overflow-hidden p-5 shadow-2xl relative" style={{ background: 'var(--glass-sidebar-bg)' }}
           >
-            <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
-              <span className="font-semibold text-[var(--glass-text)]">Create Navigation Folder</span>
-              <button onClick={() => setShowFolderModal(false)} className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+            {editingFolderId === null ? (
+              // --- MODE A: LISTING & ORDERING ALL FOLDERS ---
+              <div className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-cyan-400" />
+                    <span className="font-semibold text-[var(--glass-text)]">
+                      {language === 'ru' ? 'Управление папками чатов' : 'Manage Chat Folders'}
+                    </span>
+                  </div>
+                  <button onClick={() => setShowFolderModal(false)} className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-            <form onSubmit={handleCreateFolderSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">Folder Name</label>
-                <input 
-                  type="text" 
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="e.g. Work, Family, Channels"
-                  className="w-full bg-black/15 text-[var(--glass-text)] border border-white/5 px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all"
-                />
-              </div>
+                {/* All Folders List */}
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {(!userProfile?.folders || userProfile.folders.length === 0) ? (
+                    <div className="text-center py-6 text-xs text-slate-500 font-sans">
+                      {language === 'ru' 
+                        ? 'У вас пока нет папок. Создайте свою или добавьте готовый пресет ниже.' 
+                        : 'No custom folders yet. Create your first folder or choose a preset below.'}
+                    </div>
+                  ) : (
+                    userProfile.folders.map((f, idx) => {
+                      const listLength = userProfile.folders!.length;
+                      return (
+                        <div 
+                          key={f.id} 
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Folder className="w-4 h-4 text-cyan-500/80" />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-[var(--glass-text)]">{f.name}</span>
+                              <span className="text-[10px] text-slate-550 font-mono">
+                                {f.chatIds?.length || 0} {language === 'ru' ? 'чатов' : 'chats'}
+                              </span>
+                            </div>
+                          </div>
 
-              <div>
-                <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">Select Included Chats</label>
-                <div className="max-h-[150px] overflow-y-auto space-y-1 bg-black/15 p-2 rounded-xl border border-white/5">
-                  {chats.map((c) => (
-                    <label key={c.id} className="flex items-center gap-3 p-1.5 hover:bg-[var(--glass-item-active)] rounded-lg cursor-pointer text-xs text-[var(--glass-text)]">
-                      <input 
-                        type="checkbox"
-                        checked={newFolderChats.includes(c.id)}
-                        onChange={() => {
-                          setNewFolderChats(prev => 
-                            prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
-                          );
-                        }}
-                        className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent" 
-                      />
-                      <img src={c.photoURL} alt={c.title} className="w-6 h-6 rounded-full" />
-                      <span className="font-medium text-[var(--glass-text)]">{c.title}</span>
-                    </label>
-                  ))}
+                          {/* Controls Row */}
+                          <div className="flex items-center gap-1">
+                            {/* Sort Up */}
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveFolder(idx, 'up')}
+                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 disabled:opacity-25 disabled:hover:text-slate-450 cursor-pointer disabled:cursor-not-allowed"
+                              title="Move Up"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            {/* Sort Down */}
+                            <button
+                              type="button"
+                              disabled={idx === listLength - 1}
+                              onClick={() => handleMoveFolder(idx, 'down')}
+                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 disabled:opacity-25 disabled:hover:text-slate-450 cursor-pointer disabled:cursor-not-allowed"
+                              title="Move Down"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                            {/* Edit */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingFolderId(f.id);
+                                setNewFolderName(f.name);
+                                setNewFolderChats(f.chatIds || []);
+                              }}
+                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 cursor-pointer"
+                              title="Edit Folder"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {/* Delete */}
+                            <button
+                              type="button"
+                              onClick={() => deleteFolder(f.id)}
+                              className="p-1 rounded text-slate-450 hover:text-rose-400 hover:bg-white/5 cursor-pointer"
+                              title="Delete Folder"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Preset Fast Creation Row */}
+                <div className="p-3 rounded-xl bg-black/20 border border-white/5 space-y-2">
+                  <span className="block text-[10px] font-mono text-cyan-400/80 uppercase tracking-widest flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    {language === 'ru' ? 'Шаблоны папок (Прекрасный пресет)' : 'Quick-Start Presets'}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleCreatePreset('work')}
+                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
+                    >
+                      💼 {language === 'ru' ? '+ Работа' : '+ Work/Groups'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCreatePreset('channels')}
+                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
+                    >
+                      📢 {language === 'ru' ? '+ Каналы' : '+ Channels'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCreatePreset('unread')}
+                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
+                    >
+                      🔵 {language === 'ru' ? '+ Новые' : '+ Unread'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Add Custom / General Actions */}
+                <div className="pt-3 border-t border-white/5 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingFolderId('new');
+                      setNewFolderName('');
+                      setNewFolderChats([]);
+                    }}
+                    className="flex-1 py-2 bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-xl text-xs font-semibold shadow hover:opacity-95 text-center cursor-pointer transition-all active:scale-95"
+                  >
+                    🚀 {language === 'ru' ? 'Создать свою папку' : 'Create Custom Folder'}
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowFolderModal(false)}
+                    className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-300 font-semibold cursor-pointer"
+                  >
+                    {language === 'ru' ? 'Закрыть' : 'Close'}
+                  </button>
                 </div>
               </div>
+            ) : (
+              // --- MODE B: FORM FOR ADDING / EDITING ---
+              <div>
+                <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
+                  <span className="font-semibold text-[var(--glass-text)] text-sm">
+                    {editingFolderId === 'new' 
+                      ? (language === 'ru' ? 'Создание новой папки' : 'Create Custom Folder')
+                      : (language === 'ru' ? 'Редактирование папки' : 'Edit Folder Settings')
+                    }
+                  </span>
+                  <button 
+                    onClick={() => {
+                      setEditingFolderId(null);
+                      setNewFolderName('');
+                      setNewFolderChats([]);
+                    }} 
+                    className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-              <div className="pt-3 border-t border-white/5 flex justify-end gap-2 text-sm">
-                <button type="button" onClick={() => setShowFolderModal(false)} className="px-4 py-2 bg-black/10 hover:bg-black/20 rounded-xl text-[var(--glass-text-muted)] cursor-pointer">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-[var(--glass-accent)] rounded-xl text-white font-semibold shadow hover:opacity-90 cursor-pointer">Save Folder</button>
+                <form onSubmit={handleCreateFolderSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">
+                      {language === 'ru' ? 'Название папки' : 'Folder Name'}
+                    </label>
+                    <input 
+                      type="text" 
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder={language === 'ru' ? 'например: Работа, Семья, Блоги' : 'Work, Squad, Channels'}
+                      className="w-full bg-black/15 text-[var(--glass-text)] border border-white/5 px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-slate-200 placeholder-slate-650 font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">
+                      {language === 'ru' ? 'Выберите диалоги для папки' : 'Select Chats to Include'}
+                    </label>
+                    <div className="max-h-[160px] overflow-y-auto space-y-1 bg-black/15 p-2 rounded-xl border border-white/5">
+                      {chats.map((c) => (
+                        <label key={c.id} className="flex items-center gap-3 p-1.5 hover:bg-[var(--glass-item-active)] rounded-lg cursor-pointer text-xs text-[var(--glass-text)]">
+                          <input 
+                            type="checkbox"
+                            checked={newFolderChats.includes(c.id)}
+                            onChange={() => {
+                              setNewFolderChats(prev => 
+                                prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
+                              );
+                            }}
+                            className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent cursor-pointer" 
+                          />
+                          <img src={c.photoURL} alt={c.title} className="w-6 h-6 rounded-full inline-block border border-white/5 shrink-0" />
+                          <span className="font-medium text-slate-200 max-w-[200px] truncate">{c.title}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-white/5 flex justify-end gap-2 text-xs font-semibold">
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setEditingFolderId(null);
+                        setNewFolderName('');
+                        setNewFolderChats([]);
+                      }} 
+                      className="px-4 py-2 bg-black/10 hover:bg-black/20 rounded-xl text-slate-400 cursor-pointer"
+                    >
+                      {language === 'ru' ? 'Назад' : 'Back to List'}
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-xl text-white font-semibold shadow cursor-pointer active:scale-95 transition"
+                    >
+                      {language === 'ru' ? 'Сохранить папку' : 'Save Folder'}
+                    </button>
+                  </div>
+                </form>
               </div>
-            </form>
+            )}
           </motion.div>
         </div>
       )}
@@ -761,222 +1118,397 @@ export const Sidebar: React.FC = () => {
               <X className="w-5 h-5" />
             </button>
           </div>
+          {/* Category Tabs Switcher */}
+          <div className="flex border-b border-white/5 bg-white/[0.02] text-[10px] uppercase font-bold tracking-wider font-mono">
+            {[
+              { id: 'account', label: language === 'ru' ? 'Аккаунт' : 'Account' },
+              { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats' },
+              { id: 'notifications', label: language === 'ru' ? 'Увед.' : 'Notif.' },
+              { id: 'privacy', label: language === 'ru' ? 'Приват.' : 'Privacy' },
+              { id: 'data', label: language === 'ru' ? 'Данные' : 'Data' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSettingsTab(tab.id as any)}
+                className={`flex-1 py-3 text-center border-b-2 transition cursor-pointer ${settingsTab === tab.id ? 'border-[var(--glass-accent)] text-[var(--glass-accent)] bg-white/[0.03]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
           <div className="flex-1 p-5 overflow-y-auto space-y-5">
-            {/* Visual Header */}
-            <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5 relative">
-              <div className="relative group w-20 h-20">
-                <img src={userProfile?.photoURL} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
-                <label className="absolute inset-0 bg-black/55 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-1">
-                  <span className="text-[9px] font-bold text-white uppercase">{language === 'ru' ? 'Изменить' : 'Change'}</span>
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        try {
-                          await uploadAvatar(file);
-                        } catch (err: any) {
-                          alert(language === 'ru' ? 'Ошибка загрузки аватара: ' + err.message : 'Error uploading avatar: ' + err.message);
+            {settingsTab === 'account' && (
+              <>
+                {/* Visual Header */}
+                <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5 relative">
+                  <div className="relative group w-20 h-20">
+                    <img src={userProfile?.photoURL} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
+                    <label className="absolute inset-0 bg-black/55 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-1">
+                      <span className="text-[9px] font-bold text-white uppercase">{language === 'ru' ? 'Изменить' : 'Change'}</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              await uploadAvatar(file);
+                            } catch (err: any) {
+                              alert(language === 'ru' ? 'Ошибка загрузки аватара: ' + err.message : 'Error uploading avatar: ' + err.message);
+                            }
+                          }
+                        }}
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+                  {userProfile?.photoURL && !userProfile.photoURL.includes('dicebear') && (
+                    <button 
+                      onClick={async () => {
+                        if (window.confirm(language === 'ru' ? 'Удалить аватар?' : 'Delete avatar?')) {
+                          await deleteAvatar();
                         }
-                      }
-                    }}
-                    className="hidden" 
-                  />
-                </label>
-              </div>
-              {userProfile?.photoURL && !userProfile.photoURL.includes('dicebear') && (
-                <button 
-                  onClick={async () => {
-                    if (window.confirm(language === 'ru' ? 'Удалить аватар?' : 'Delete avatar?')) {
-                      await deleteAvatar();
-                    }
-                  }}
-                  className="text-[9px] font-semibold text-rose-450 hover:text-rose-400 underline transition cursor-pointer"
-                >
-                  {language === 'ru' ? 'Удалить фото' : 'Delete photo'}
-                </button>
-              )}
-              <div className="font-semibold text-lg text-slate-200 mt-1">{userProfile?.displayName}</div>
-              <div className="text-xs font-mono text-[var(--glass-accent)]">@{userProfile?.username}</div>
-              <div className="text-[10px] text-slate-505 font-mono">
-                {language === 'ru' ? 'Регистрация:' : 'Registered:'} {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}
-              </div>
-            </div>
-
-            {/* Premium Theme Selector glass card */}
-            <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
-              <span className="block text-xs font-mono text-slate-400 mb-1 uppercase tracking-wider">
-                {language === 'ru' ? 'Выберите тему Glass UI' : 'Select Glass UI Theme'}
-              </span>
-              <div className="grid grid-cols-5 gap-1.5 pt-1">
-                {[
-                  { id: 'theme-light-glass', name: language === 'ru' ? 'Светлая' : 'Light', bg: 'bg-slate-200 border-slate-350' },
-                  { id: 'theme-dark-glass', name: language === 'ru' ? 'Тёмная' : 'Dark', bg: 'bg-slate-900 border-slate-755' },
-                  { id: 'theme-midnight-glass', name: language === 'ru' ? 'Космос' : 'Midnight', bg: 'bg-indigo-950 border-indigo-900' },
-                  { id: 'theme-arctic-glass', name: language === 'ru' ? 'Арктика' : 'Arctic', bg: 'bg-sky-200 border-sky-305' },
-                  { id: 'theme-ocean-glass', name: language === 'ru' ? 'Океан' : 'Ocean', bg: 'bg-teal-900 border-teal-750' }
-                ].map((tTheme) => (
-                  <button
-                    key={tTheme.id}
-                    type="button"
-                    title={tTheme.name}
-                    onClick={() => setTheme(tTheme.id)}
-                    className={`relative flex flex-col items-center justify-center p-1.5 rounded-xl border transition-all cursor-pointer ${
-                      theme === tTheme.id 
-                        ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] shadow-md scale-105' 
-                        : 'bg-black/10 border-transparent hover:border-white/10 hover:bg-black/20'
-                    }`}
-                  >
-                    <span className={`w-3.5 h-3.5 rounded-full ${tTheme.bg} border shrink-0`} />
-                    <span className="text-[9px] font-medium tracking-tight mt-1 text-slate-305 block truncate max-w-full text-center">
-                      {tTheme.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Profile fields Editing */}
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Имя' : 'Display Name'}</label>
-                <input 
-                  type="text" 
-                  value={editDisplayName} 
-                  onChange={(e) => setEditDisplayName(e.target.value)}
-                  className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Статус' : 'Status Message'}</label>
-                <input 
-                  type="text" 
-                  value={editStatus} 
-                  onChange={(e) => setEditStatus(e.target.value)}
-                  className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Emoji статус' : 'Emoji Status'}</label>
-                  <input 
-                    type="text" 
-                    placeholder="🚀, 💻, 🌴"
-                    value={editEmojiStatus} 
-                    onChange={(e) => setEditEmojiStatus(e.target.value)}
-                    maxLength={3}
-                    className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-center" 
-                  />
+                      }}
+                      className="text-[9px] font-semibold text-rose-450 hover:text-rose-400 underline transition cursor-pointer"
+                    >
+                      {language === 'ru' ? 'Удалить фото' : 'Delete photo'}
+                    </button>
+                  )}
+                  <div className="font-semibold text-lg text-slate-200 mt-1">{userProfile?.displayName}</div>
+                  <div className="text-xs font-mono text-[var(--glass-accent)]">@{userProfile?.username}</div>
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    {language === 'ru' ? 'Регистрация:' : 'Registered:'} {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'Телефон' : 'Phone Number'}</label>
-                  <input 
-                    type="text" 
-                    placeholder="+7 999..."
-                    value={editPhoneNumber} 
-                    onChange={(e) => setEditPhoneNumber(e.target.value)}
-                    className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
-                  />
-                </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-mono text-slate-405 mb-1">{language === 'ru' ? 'О себе (Bio)' : 'Bio'}</label>
-                <textarea 
-                  value={editBio} 
-                  onChange={(e) => setEditBio(e.target.value)} 
-                  className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 h-16 resize-none animate-fade-in-up" 
-                />
-              </div>
+                {/* Profile fields Editing */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Имя' : 'Display Name'}</label>
+                    <input 
+                      type="text" 
+                      value={editDisplayName} 
+                      onChange={(e) => setEditDisplayName(e.target.value)}
+                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
+                    />
+                  </div>
 
-              {/* Privacy Settings Accordion */}
-              <div className="p-3 bg-white/[0.02] rounded-2xl border border-white/5 space-y-3">
-                <span className="block text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">
-                  {language === 'ru' ? 'Приватность' : 'Privacy Settings'}
-                </span>
-                
-                <div className="space-y-2 text-xs">
-                  {[
-                    { label: language === 'ru' ? 'Номер телефона' : 'Phone Number', val: privacyNumber, set: setPrivacyNumber },
-                    { label: language === 'ru' ? 'Статус-сообщение' : 'Status Message', val: privacyStatus, set: setPrivacyStatus },
-                    { label: language === 'ru' ? 'Фото профиля' : 'Profile Avatar', val: privacyPhoto, set: setPrivacyPhoto },
-                    { label: language === 'ru' ? 'Последний визит' : 'Last Seen Time', val: privacyLastSeen, set: setPrivacyLastSeen },
-                    { label: language === 'ru' ? 'Статус онлайн' : 'Online Status', val: privacyOnline, set: setPrivacyOnline }
-                  ].map((field, idx) => (
-                    <div key={idx} className="flex items-center justify-between gap-1 border-b border-white/[0.02] pb-1.5 last:border-0 last:pb-0">
-                      <span className="text-slate-400 font-sans">{field.label}</span>
-                      <select 
-                        value={field.val} 
-                        onChange={(e) => field.set(e.target.value as any)}
-                        className="bg-black/40 text-slate-200 border border-white/5 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--glass-border-focus)] font-mono shrink-0 cursor-pointer"
-                      >
-                        <option value="all">{language === 'ru' ? 'Все' : 'Everyone'}</option>
-                        <option value="contacts">{language === 'ru' ? 'Контакты' : 'Contacts'}</option>
-                        <option value="nobody">{language === 'ru' ? 'Никто' : 'Nobody'}</option>
-                      </select>
+                  <div>
+                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Статус' : 'Status Message'}</label>
+                    <input 
+                      type="text" 
+                      value={editStatus} 
+                      onChange={(e) => setEditStatus(e.target.value)}
+                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Emoji статус' : 'Emoji Status'}</label>
+                      <input 
+                        type="text" 
+                        placeholder="🚀, 💻, 🌴"
+                        value={editEmojiStatus} 
+                        onChange={(e) => setEditEmojiStatus(e.target.value)}
+                        maxLength={3}
+                        className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-center" 
+                      />
                     </div>
-                  ))}
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Телефон' : 'Phone Number'}</label>
+                      <input 
+                        type="text" 
+                        placeholder="+7 999..."
+                        value={editPhoneNumber} 
+                        onChange={(e) => setEditPhoneNumber(e.target.value)}
+                        className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'О себе (Bio)' : 'Bio'}</label>
+                    <textarea 
+                      value={editBio} 
+                      onChange={(e) => setEditBio(e.target.value)} 
+                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 h-16 resize-none animate-fade-in-up" 
+                    />
+                  </div>
+                </div>
+
+                {/* Invite Group shortcode */}
+                <div className="p-3 bg-cyan-950/15 rounded-2xl border border-cyan-500/10 space-y-2 pt-2.5 pb-3">
+                  <span className="block text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider">
+                    {language === 'ru' ? 'Присоединиться к группе' : 'Join chat by Invite Code'}
+                  </span>
+                  <div className="flex gap-1 text-xs">
+                    <input 
+                      type="text" 
+                      placeholder="invite_..."
+                      id="invite-input-field"
+                      className="flex-1 bg-black/30 text-slate-100 border border-cyan-500/10 px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-cyan-500" 
+                    />
+                    <button 
+                      onClick={async () => {
+                        const input = document.getElementById('invite-input-field') as HTMLInputElement;
+                        if (input && input.value.trim()) {
+                          try {
+                            const chatObj = await joinChatByInviteCode(input.value.trim());
+                            alert(language === 'ru' ? `Успешно вошли в: ${chatObj.title}` : `Successfully joined: ${chatObj.title}`);
+                            input.value = '';
+                          } catch (err: any) {
+                            alert(language === 'ru' ? 'Ошибка вступления: ' + err.message : 'Join error: ' + err.message);
+                          }
+                        }
+                      }}
+                      className="p-1 px-3.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-200 font-mono text-[10px] rounded-xl border border-cyan-500/30 font-semibold align-middle cursor-pointer uppercase transition duration-150 active:scale-95"
+                    >
+                      {language === 'ru' ? 'Войти' : 'Join'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Add mutual contact shortcut */}
+                <div className="pt-2 border-t border-white/5">
+                  <span className="block text-xs font-mono text-slate-400 mb-2">Connect New User</span>
+                  <form onSubmit={handleAddContactSubmit} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-2.5 top-2 text-slate-500 text-xs">@</span>
+                      <input 
+                        type="text" 
+                        placeholder="username" 
+                        value={usernameInput}
+                        onChange={(e) => setUsernameInput(e.target.value)}
+                        className="w-full pl-6 pr-2 bg-black/15 text-slate-100 border border-white/5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25" 
+                      />
+                    </div>
+                    <button type="submit" className="p-1.5 px-3 bg-[var(--glass-accent)] hover:opacity-90 rounded-lg text-white font-semibold text-xs shrink-0 cursor-pointer">
+                      Add
+                    </button>
+                  </form>
+                  {usernameError && <div className="text-rose-450 text-[10px] mt-1 font-medium">{usernameError}</div>}
+                  {usernameSuccess && <div className="text-emerald-450 text-[10px] mt-1 font-medium">{usernameSuccess}</div>}
+                </div>
+              </>
+            )}
+
+            {settingsTab === 'chats' && (
+              <div className="space-y-4">
+                {/* Premium Theme Selector glass card */}
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
+                  <span className="block text-xs font-mono text-slate-400 mb-1 uppercase tracking-wider">
+                    {language === 'ru' ? 'Выберите тему Glass UI' : 'Select Glass UI Theme'}
+                  </span>
+                  <div className="grid grid-cols-5 gap-1.5 pt-1">
+                    {[
+                      { id: 'theme-light-glass', name: language === 'ru' ? 'Светлая' : 'Light', bg: 'bg-slate-200 border-slate-300' },
+                      { id: 'theme-dark-glass', name: language === 'ru' ? 'Тёмная' : 'Dark', bg: 'bg-slate-900 border-slate-700' },
+                      { id: 'theme-midnight-glass', name: language === 'ru' ? 'Космос' : 'Midnight', bg: 'bg-indigo-950 border-indigo-900' },
+                      { id: 'theme-arctic-glass', name: language === 'ru' ? 'Арктика' : 'Arctic', bg: 'bg-sky-200 border-sky-300' },
+                      { id: 'theme-ocean-glass', name: language === 'ru' ? 'Океан' : 'Ocean', bg: 'bg-teal-900 border-teal-700' }
+                    ].map((tTheme) => (
+                      <button
+                        key={tTheme.id}
+                        type="button"
+                        title={tTheme.name}
+                        onClick={() => setTheme(tTheme.id)}
+                        className={`relative flex flex-col items-center justify-center p-1.5 rounded-xl border transition-all cursor-pointer ${
+                          theme === tTheme.id 
+                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] shadow-md scale-105' 
+                            : 'bg-black/10 border-transparent hover:border-white/10 hover:bg-black/20'
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded-full ${tTheme.bg} border shrink-0`} />
+                        <span className="text-[9px] font-medium tracking-tight mt-1 text-slate-300 block truncate max-w-full text-center">
+                          {tTheme.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Font/Text Size Settings */}
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
+                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
+                    {language === 'ru' ? 'Размер шрифта чата' : 'Chat Text Size'}
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'xs', name: language === 'ru' ? 'Мелкий' : 'Small' },
+                      { id: 'sm', name: language === 'ru' ? 'Средний' : 'Medium' },
+                      { id: 'base', name: language === 'ru' ? 'Крупный' : 'Large' }
+                    ].map((sOpt) => (
+                      <button
+                        key={sOpt.id}
+                        type="button"
+                        onClick={() => {
+                          setTextSizeSelection(sOpt.id);
+                          localStorage.setItem('vi-chat-text-size', sOpt.id);
+                          window.dispatchEvent(new Event('vi-settings-changed'));
+                        }}
+                        className={`py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition ${
+                          textSizeSelection === sOpt.id
+                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] text-slate-100'
+                            : 'bg-black/10 border-white/5 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {sOpt.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Wallpaper Settings */}
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
+                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
+                    {language === 'ru' ? 'Фон чата' : 'Chat Wallpaper'}
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'cosmic', name: language === 'ru' ? 'Космос' : 'Cosmic Slate' },
+                      { id: 'aurora', name: language === 'ru' ? 'Аврора' : 'Aurora Dream' },
+                      { id: 'minimal', name: language === 'ru' ? 'Темный' : 'Minimal Charcoal' },
+                      { id: 'warm', name: language === 'ru' ? 'Теплый' : 'Warm Sunset' }
+                    ].map((pOpt) => (
+                      <button
+                        key={pOpt.id}
+                        type="button"
+                        onClick={() => {
+                          setWallpaperSelection(pOpt.id);
+                          localStorage.setItem('vi-chat-wallpaper', pOpt.id);
+                          window.dispatchEvent(new Event('vi-settings-changed'));
+                        }}
+                        className={`py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition ${
+                          wallpaperSelection === pOpt.id
+                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] text-slate-100'
+                            : 'bg-black/10 border-white/5 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {pOpt.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
+            )}
 
-              {/* Join Chat by invitation code */}
-              <div className="p-3 bg-cyan-950/15 rounded-2xl border border-cyan-500/10 space-y-2 pt-2.5 pb-3">
-                <span className="block text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider">
-                  {language === 'ru' ? 'Присоединиться к группе' : 'Join chat by Invite Code'}
-                </span>
-                <div className="flex gap-1 text-xs">
-                  <input 
-                    type="text" 
-                    placeholder="invite_..."
-                    id="invite-input-field"
-                    className="flex-1 bg-black/30 text-slate-100 border border-cyan-500/10 px-2 py-1 rounded-xl text-xs focus:outline-none focus:border-cyan-555" 
-                  />
+            {settingsTab === 'notifications' && (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-3">
+                  <span className="block text-xs font-mono text-slate-400 font-bold uppercase tracking-wider">
+                    {language === 'ru' ? 'Звук и Вибрация' : 'Sound & Vibration'}
+                  </span>
+
+                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.04]">
+                    <span className="text-xs text-slate-300">{language === 'ru' ? 'Звуковые уведомления' : 'Sound Notifications'}</span>
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded accent-[var(--glass-accent)] cursor-pointer"
+                      checked={soundEnabled}
+                      onChange={(e) => {
+                        setSoundEnabled(e.target.checked);
+                        localStorage.setItem('vi-sound-notifications', String(e.target.checked));
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300">{language === 'ru' ? 'Вибро-отклик (Swipe/Send)' : 'Haptic Vibration on Swipes'}</span>
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded accent-[var(--glass-accent)] cursor-pointer"
+                      checked={vibeEnabled}
+                      onChange={(e) => {
+                        setVibeEnabled(e.target.checked);
+                        localStorage.setItem('vi-vibe-notifications', String(e.target.checked));
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-black/10 rounded-2xl border border-white/5">
+                  <span className="block text-xs font-mono text-slate-400 uppercase mb-1">Mute Chats Overrides</span>
+                  <p className="text-[10px] text-slate-505 leading-relaxed font-sans">
+                    {language === 'ru' 
+                      ? 'Чтобы отключить звук для конкретного диалога, удерживайте или кликайте правой кнопкой мыши по чату в левом списке и выберите "Mute".' 
+                      : 'To mute sounds on a specific conversation, right click or long press Chat in sidebar and toggle "Mute".'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'privacy' && (
+              <div className="space-y-4">
+                {/* Privacy Settings Accordion */}
+                <div className="p-3 bg-white/[0.02] rounded-2xl border border-white/5 space-y-3">
+                  <span className="block text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">
+                    {language === 'ru' ? 'Приватность аккаунта' : 'Privacy Settings'}
+                  </span>
+                  
+                  <div className="space-y-2 text-xs">
+                    {[
+                      { label: language === 'ru' ? 'Номер телефона' : 'Phone Number', val: privacyNumber, set: setPrivacyNumber },
+                      { label: language === 'ru' ? 'Статус-сообщение' : 'Status Message', val: privacyStatus, set: setPrivacyStatus },
+                      { label: language === 'ru' ? 'Фото профиля' : 'Profile Avatar', val: privacyPhoto, set: setPrivacyPhoto },
+                      { label: language === 'ru' ? 'Последний визит' : 'Last Seen Time', val: privacyLastSeen, set: setPrivacyLastSeen },
+                      { label: language === 'ru' ? 'Статус онлайн' : 'Online Status', val: privacyOnline, set: setPrivacyOnline }
+                    ].map((field, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-1 border-b border-white/[0.02] pb-1.5 last:border-0 last:pb-0">
+                        <span className="text-slate-400 font-sans">{field.label}</span>
+                        <select 
+                          value={field.val} 
+                          onChange={(e) => field.set(e.target.value as any)}
+                          className="bg-black/40 text-slate-200 border border-white/5 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--glass-border-focus)] font-mono shrink-0 cursor-pointer"
+                        >
+                          <option value="all">{language === 'ru' ? 'Все' : 'Everyone'}</option>
+                          <option value="contacts">{language === 'ru' ? 'Контакты' : 'Contacts'}</option>
+                          <option value="nobody">{language === 'ru' ? 'Никто' : 'Nobody'}</option>
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'data' && (
+              <div className="space-y-4">
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5">
+                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
+                    {language === 'ru' ? 'Память и Кэш' : 'Storage Metrics'}
+                  </span>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400">{language === 'ru' ? 'База данных Firestore' : 'Firestore Queries'}</span>
+                    <span className="font-mono text-cyan-400">Online Sync (Active)</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400">{language === 'ru' ? 'Локальное хранилище' : 'Local Sandbox Size'}</span>
+                    <span className="font-mono text-slate-300">~1.2 MB</span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-rose-950/10 rounded-2xl border border-rose-500/10 space-y-2">
+                  <span className="block text-xs font-mono text-rose-400 uppercase tracking-wider">{language === 'ru' ? 'Опасная зона' : 'Dangerous Zone'}</span>
+                  <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
+                    {language === 'ru' 
+                      ? 'Очистка кэша удалит все ваши локальные черновики, кэшированные авы и системные параметры.'
+                      : 'Clearing cache removes local draft previews, offline caches and reset preferences.'}
+                  </p>
                   <button 
-                    onClick={async () => {
-                      const input = document.getElementById('invite-input-field') as HTMLInputElement;
-                      if (input && input.value.trim()) {
-                        try {
-                          const chatObj = await joinChatByInviteCode(input.value.trim());
-                          alert(language === 'ru' ? `Успешно вошли в: ${chatObj.title}` : `Successfully joined: ${chatObj.title}`);
-                          input.value = '';
-                        } catch (err: any) {
-                          alert(language === 'ru' ? 'Ошибка вступления: ' + err.message : 'Join error: ' + err.message);
-                        }
-                      }
+                    onClick={() => {
+                      localStorage.clear();
+                      alert(language === 'ru' ? 'Локальный кэш успешно очищен!' : 'Local cache cleaned up!');
+                      window.location.reload();
                     }}
-                    className="p-1 px-3.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-200 font-mono text-[10px] rounded-xl border border-cyan-500/30 font-semibold align-middle cursor-pointer uppercase transition duration-150 active:scale-95"
+                    className="w-full py-2 bg-rose-900/35 hover:bg-rose-800 hover:text-white border border-rose-500/30 rounded-xl font-mono uppercase text-[10px] font-bold text-rose-300 cursor-pointer transition active:scale-95"
                   >
-                    {language === 'ru' ? 'Войти' : 'Join'}
+                    {language === 'ru' ? 'Очистить кэш приложения' : 'Clear Application Cache'}
                   </button>
                 </div>
               </div>
-            </div>
-
-            {/* Add mutual contact form shortcut */}
-            <div className="pt-4 border-t border-white/5">
-              <span className="block text-xs font-mono text-slate-400 mb-2">Connect New User</span>
-              <form onSubmit={handleAddContactSubmit} className="flex gap-2">
-                <div className="relative flex-1">
-                  <span className="absolute left-2.5 top-2 text-slate-500 text-xs">@</span>
-                  <input 
-                    type="text" 
-                    placeholder="username" 
-                    value={usernameInput}
-                    onChange={(e) => setUsernameInput(e.target.value)}
-                    className="w-full pl-6 pr-2 bg-black/15 text-slate-100 border border-white/5 py-1.5 rounded-lg text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25" 
-                  />
-                </div>
-                <button type="submit" className="p-1.5 px-3 bg-[var(--glass-accent)] hover:opacity-90 rounded-lg text-white font-semibold text-xs shrink-0 cursor-pointer">
-                  Add
-                </button>
-              </form>
-              {usernameError && <div className="text-rose-450 text-[10px] mt-1 font-medium">{usernameError}</div>}
-              {usernameSuccess && <div className="text-emerald-450 text-[10px] mt-1 font-medium">{usernameSuccess}</div>}
-            </div>
+            )}
           </div>
 
           <div className="p-4 bg-white/[0.01] border-t border-white/5 flex justify-end gap-2 text-xs">

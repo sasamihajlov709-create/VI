@@ -71,19 +71,50 @@ export interface Chat {
   rules?: string;
   welcomeMessage?: string;
   typing?: { [userId: string]: number }; // map of userId to last typing timestamp
+  drafts?: { [userId: string]: string }; // map of userId to draft text
+  editingDrafts?: { [userId: string]: { messageId: string; text: string } }; // map of userId to active edit message draft
   pinnedMessageId?: string; // pinned message per chat
   pinnedMessageIds?: string[]; // support for multiple pinned messages
   topics?: Topic[]; // topic-based forum mode
   linkedChatId?: string; // forum group linked to channel for comment sections
   slowModeSeconds?: number;
   isBot?: boolean;
+  isPublic?: boolean; // public queryable status
+  username?: string; // public @username tag
   description?: string; // chat bio/info description
   inviteLink?: string; // group invitation link URL
   bannedIds?: string[]; // banned user uids
   mutedIds?: string[]; // muted user uids
+  restrictedIds?: string[]; // restricted user uids (read only, etc.)
+  mutedUntil?: { [userId: string]: number }; // timed mutes map of userId -> timestamp ms
   moderatorIds?: string[]; // moderator user uids
   adminActionsHistory?: AdminAction[]; // history log of admin actions
   views?: { [messageId: string]: string[] }; // messageId -> user uids who viewed it
+}
+
+export interface CustomInviteLink {
+  id: string; // The invite link code
+  chatId: string;
+  chatTitle: string;
+  creatorId: string;
+  creatorName: string;
+  createdAt: number;
+  expiresAt: number | null; // expiration epoch timestamp ms or null
+  usageLimit: number | null; // max number of entrants
+  usageCount: number; // current entrant count
+  isRevoked: boolean;
+}
+
+export interface JoinRequest {
+  id: string; // generated unique id
+  userId: string;
+  userDisplayName: string;
+  userPhotoURL: string;
+  chatId: string;
+  chatTitle: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reason?: string;
+  createdAt: number;
 }
 
 export interface AdminAction {
@@ -138,6 +169,7 @@ export interface ReplyToPayload {
 export interface ForwardFromPayload {
   senderId: string;
   senderName: string;
+  id?: string;
 }
 
 export interface Message {

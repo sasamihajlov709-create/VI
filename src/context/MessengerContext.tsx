@@ -47,7 +47,10 @@ import {
   CallSession, 
   Story, 
   ChatFolder,
-  ActiveSession
+  ActiveSession,
+  CustomInviteLink,
+  JoinRequest,
+  AdminAction
 } from '../types';
 
 interface MessengerContextType {
@@ -110,8 +113,10 @@ interface MessengerContextType {
   sendStickerMessage: (stickerUrl: string) => Promise<void>;
   uploadSticker: (file: File) => Promise<void>;
   sendTypingStatus: (chatId: string) => Promise<void>;
+  saveChatDraft: (chatId: string, text: string) => Promise<void>;
   editMessage: (messageId: string, newText: string) => Promise<void>;
   deleteMessage: (messageId: string) => Promise<void>;
+  saveMessageToFavorites: (message: Message) => Promise<void>;
   addMessageReaction: (messageId: string, emoji: string) => Promise<void>;
   removeMessageReaction: (messageId: string) => Promise<void>;
   pinMessage: (chatId: string, messageId: string | null) => Promise<void>;
@@ -150,6 +155,17 @@ interface MessengerContextType {
   addMemberToChat: (chatId: string, targetUid: string) => Promise<void>;
   joinChatByInviteCode: (inviteCode: string) => Promise<Chat>;
   updateGroupInfo: (chatId: string, title: string, description?: string, photoURL?: string) => Promise<void>;
+  updateChatDetails: (chatId: string, details: { title?: string; description?: string; photoURL?: string; isPublic?: boolean; username?: string; slowModeSeconds?: number; rules?: string; welcomeMessage?: string }) => Promise<void>;
+  updateMemberRole: (chatId: string, memberId: string, role: 'admin' | 'moderator' | 'member' | 'restricted', targetName: string) => Promise<void>;
+  kickMember: (chatId: string, memberId: string, targetName: string) => Promise<void>;
+  banMember: (chatId: string, memberId: string, targetName: string) => Promise<void>;
+  unbanMember: (chatId: string, memberId: string, targetName: string) => Promise<void>;
+  muteMember: (chatId: string, memberId: string, targetName: string, durationMinutes?: number) => Promise<void>;
+  unmuteMember: (chatId: string, memberId: string, targetName: string) => Promise<void>;
+  generateInviteLink: (chatId: string, usageLimit: number | null, expiresHours: number | null) => Promise<CustomInviteLink>;
+  revokeInviteLink: (inviteId: string) => Promise<void>;
+  submitJoinRequest: (chatId: string, reason?: string) => Promise<void>;
+  handleJoinRequest: (requestId: string, action: 'approved' | 'rejected') => Promise<void>;
 }
 
 const MessengerContext = createContext<MessengerContextType | undefined>(undefined);
@@ -793,11 +809,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const createDirectChat = async (targetUser: UserProfile): Promise<Chat> => {
     if (!currentUser || !userProfile) throw new Error('Not authenticated');
 
+    const isSelf = targetUser.uid === currentUser.uid;
+
     // 1. Check if direct chat already exists
     const existing = chats.find(c => 
       c.type === 'direct' && 
-      c.members.includes(currentUser.uid) && 
-      c.members.includes(targetUser.uid)
+      (isSelf 
+        ? c.members.length === 1 && c.members[0] === currentUser.uid
+        : c.members.length === 2 && c.members.includes(currentUser.uid) && c.members.includes(targetUser.uid)
+      )
     );
     if (existing) {
       setActiveChat(existing);
@@ -806,17 +826,19 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // 2. Otherwise create transactional-safely
     const newChatId = doc(collection(db, 'chats')).id;
+    const membersList = isSelf ? [currentUser.uid] : [currentUser.uid, targetUser.uid];
+    const language = localStorage.getItem('vi_messenger_lang') || 'ru';
     const newChat: Chat = {
       id: newChatId,
       type: 'direct',
-      title: targetUser.displayName,
-      photoURL: targetUser.photoURL,
-      members: [currentUser.uid, targetUser.uid],
-      admins: [currentUser.uid, targetUser.uid],
+      title: isSelf ? (language === 'ru' ? 'Избранное' : 'Saved Messages') : targetUser.displayName,
+      photoURL: isSelf ? '' : targetUser.photoURL,
+      members: membersList,
+      admins: membersList,
       creatorId: currentUser.uid,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      unreadCounts: {
+      unreadCounts: isSelf ? { [currentUser.uid]: 0 } : {
         [currentUser.uid]: 0,
         [targetUser.uid]: 0
       }
@@ -979,19 +1001,48 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const joinChatByInviteCode = async (inviteCode: string) => {
     if (!currentUser || !userProfile) throw new Error('Not authenticated');
-    let chatId = inviteCode.trim();
-    if (chatId.includes('/invite/')) {
-      chatId = chatId.split('/invite/').pop() || '';
-    } else if (chatId.startsWith('invite_')) {
-      chatId = chatId.substring(7);
+    let chatIdOrInviteId = inviteCode.trim();
+    if (chatIdOrInviteId.includes('/join/')) {
+      chatIdOrInviteId = chatIdOrInviteId.split('/join/').pop() || '';
+    } else if (chatIdOrInviteId.includes('/invite/')) {
+      chatIdOrInviteId = chatIdOrInviteId.split('/invite/').pop() || '';
+    } else if (chatIdOrInviteId.startsWith('invite_')) {
+      chatIdOrInviteId = chatIdOrInviteId.substring(7);
     }
 
-    if (!chatId) throw new Error('Invalid invite link or code');
+    if (!chatIdOrInviteId) throw new Error('Invalid invite link or code');
 
-    const chatDocRef = doc(db, 'chats', chatId);
+    // Attempt to lookup in custom invites collection first
+    const inviteDocRef = doc(db, 'invites', chatIdOrInviteId);
+    let inviteSnap;
+    try {
+      inviteSnap = await getDoc(inviteDocRef);
+    } catch (e) {
+      // ignore, might be legacy chatId join
+    }
+
+    let targetChatId = chatIdOrInviteId;
+    let customInviteUsed = false;
+
+    if (inviteSnap && inviteSnap.exists()) {
+      const inviteData = inviteSnap.data() as CustomInviteLink;
+      if (inviteData.isRevoked) {
+        throw new Error('This invite link has been revoked');
+      }
+      if (inviteData.expiresAt && Date.now() > inviteData.expiresAt) {
+        throw new Error('This invite link has expired');
+      }
+      if (inviteData.usageLimit && inviteData.usageCount >= inviteData.usageLimit) {
+        throw new Error('This invite link has reached its usage limit');
+      }
+      targetChatId = inviteData.chatId;
+      customInviteUsed = true;
+    }
+
+    const chatDocRef = doc(db, 'chats', targetChatId);
     const chatSnap = await getDoc(chatDocRef);
     if (!chatSnap.exists()) {
-      throw new Error('Group chat not found');
+      throw new Error('Group or channel not found');
     }
 
     const chatData = chatSnap.data() as Chat;
@@ -1000,18 +1051,25 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     await updateDoc(chatDocRef, {
-      members: arrayUnion(currentUser.uid)
+      members: arrayUnion(currentUser.uid),
+      [`unreadCounts.${currentUser.uid}`]: 0
     });
+
+    if (customInviteUsed) {
+      await updateDoc(inviteDocRef, {
+        usageCount: increment(1)
+      });
+    }
 
     // Send system message
     const systemMsgId = doc(collection(db, 'messages')).id;
     const systemMsg: Message = {
       id: systemMsgId,
-      chatId: chatId,
+      chatId: targetChatId,
       senderId: 'SYSTEM',
       senderName: 'VI Assistant',
       senderPhotoURL: 'https://img.icons8.com/color/192/speech-bubble.png',
-      text: `${userProfile.displayName} has joined the chat via invite link.`,
+      text: `${userProfile.displayName} has joined the chat${customInviteUsed ? ' via invite link' : ''}.`,
       type: 'text',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1019,7 +1077,269 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
     await setDoc(doc(db, 'messages', systemMsgId), systemMsg);
 
-    return chatData;
+    return { ...chatData, members: [...chatData.members, currentUser.uid] };
+  };
+
+  const updateChatDetails = async (
+    chatId: string,
+    details: { title?: string; description?: string; photoURL?: string; isPublic?: boolean; username?: string; slowModeSeconds?: number; rules?: string; welcomeMessage?: string }
+  ) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatDocRef = doc(db, 'chats', chatId);
+    const upd: any = { updatedAt: Date.now() };
+    if (details.title !== undefined) upd.title = details.title.trim();
+    if (details.description !== undefined) upd.description = details.description.trim();
+    if (details.photoURL !== undefined) upd.photoURL = details.photoURL;
+    if (details.isPublic !== undefined) upd.isPublic = details.isPublic;
+    if (details.username !== undefined) upd.username = details.username.trim().toLowerCase().replace(/^@/, '');
+    if (details.slowModeSeconds !== undefined) upd.slowModeSeconds = details.slowModeSeconds;
+    if (details.rules !== undefined) upd.rules = details.rules;
+    if (details.welcomeMessage !== undefined) upd.welcomeMessage = details.welcomeMessage;
+
+    await updateDoc(chatDocRef, upd);
+  };
+
+  const logAdminAction = async (chatId: string, actionName: 'ban' | 'unban' | 'mute' | 'unmute' | 'promote' | 'demote' | 'kick' | 'pin' | 'unpin', targetId: string, targetName: string) => {
+    if (!currentUser || !userProfile) return;
+    const actionId = doc(collection(db, 'chats')).id;
+    const newLogAction: AdminAction = {
+      id: actionId,
+      adminId: currentUser.uid,
+      adminName: userProfile.displayName || 'Admin',
+      action: actionName,
+      targetId,
+      targetName,
+      timestamp: Date.now()
+    };
+    
+    await updateDoc(doc(db, 'chats', chatId), {
+      adminActionsHistory: arrayUnion(newLogAction)
+    });
+
+    const systemMsgId = doc(collection(db, 'messages')).id;
+    const verbs = {
+      ban: 'banned',
+      unban: 'unbanned',
+      mute: 'muted',
+      unmute: 'unmuted',
+      promote: 'promoted',
+      demote: 'demoted',
+      kick: 'removed',
+      pin: 'pinned a message',
+      unpin: 'unpinned a message'
+    };
+    const verb = verbs[actionName] || actionName;
+    const notificationText = `🛡️ Admin Action: ${newLogAction.adminName} ${verb} ${targetName}`;
+    const sysMsg: Message = {
+      id: systemMsgId,
+      chatId,
+      senderId: 'SYSTEM',
+      senderName: 'System Monitor',
+      senderPhotoURL: 'https://img.icons8.com/color/192/automatic.png',
+      text: notificationText,
+      type: 'text',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      readBy: [currentUser.uid]
+    };
+    await setDoc(doc(db, 'messages', systemMsgId), sysMsg);
+  };
+
+  const updateMemberRole = async (chatId: string, memberId: string, role: 'admin' | 'moderator' | 'member' | 'restricted', targetName: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+
+    if (role === 'admin') {
+      await updateDoc(chatRef, {
+        admins: arrayUnion(memberId),
+        moderatorIds: arrayRemove(memberId),
+        restrictedIds: arrayRemove(memberId)
+      });
+      await logAdminAction(chatId, 'promote', memberId, targetName);
+    } else if (role === 'moderator') {
+      await updateDoc(chatRef, {
+        admins: arrayRemove(memberId),
+        moderatorIds: arrayUnion(memberId),
+        restrictedIds: arrayRemove(memberId)
+      });
+      await logAdminAction(chatId, 'promote', memberId, `${targetName} (Moderator)`);
+    } else if (role === 'restricted') {
+      await updateDoc(chatRef, {
+        admins: arrayRemove(memberId),
+        moderatorIds: arrayRemove(memberId),
+        restrictedIds: arrayUnion(memberId)
+      });
+      await logAdminAction(chatId, 'demote', memberId, `${targetName} (Restricted)`);
+    } else {
+      await updateDoc(chatRef, {
+        admins: arrayRemove(memberId),
+        moderatorIds: arrayRemove(memberId),
+        restrictedIds: arrayRemove(memberId)
+      });
+      await logAdminAction(chatId, 'demote', memberId, targetName);
+    }
+  };
+
+  const kickMember = async (chatId: string, memberId: string, targetName: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      members: arrayRemove(memberId),
+      admins: arrayRemove(memberId),
+      moderatorIds: arrayRemove(memberId),
+      restrictedIds: arrayRemove(memberId)
+    });
+    await logAdminAction(chatId, 'kick', memberId, targetName);
+  };
+
+  const banMember = async (chatId: string, memberId: string, targetName: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      members: arrayRemove(memberId),
+      admins: arrayRemove(memberId),
+      moderatorIds: arrayRemove(memberId),
+      restrictedIds: arrayRemove(memberId),
+      bannedIds: arrayUnion(memberId)
+    });
+    await logAdminAction(chatId, 'ban', memberId, targetName);
+  };
+
+  const unbanMember = async (chatId: string, memberId: string, targetName: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      bannedIds: arrayRemove(memberId)
+    });
+    await logAdminAction(chatId, 'unban', memberId, targetName);
+  };
+
+  const muteMember = async (chatId: string, memberId: string, targetName: string, durationMinutes?: number) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+    
+    if (durationMinutes && durationMinutes > 0) {
+      const until = Date.now() + durationMinutes * 60 * 1000;
+      await updateDoc(chatRef, {
+        mutedIds: arrayUnion(memberId),
+        [`mutedUntil.${memberId}`]: until
+      });
+      await logAdminAction(chatId, 'mute', memberId, `${targetName} for ${durationMinutes} mins`);
+    } else {
+      await updateDoc(chatRef, {
+        mutedIds: arrayUnion(memberId)
+      });
+      await logAdminAction(chatId, 'mute', memberId, targetName);
+    }
+  };
+
+  const unmuteMember = async (chatId: string, memberId: string, targetName: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      mutedIds: arrayRemove(memberId),
+      [`mutedUntil.${memberId}`]: 0
+    });
+    await logAdminAction(chatId, 'unmute', memberId, targetName);
+  };
+
+  const generateInviteLink = async (chatId: string, usageLimit: number | null, expiresHours: number | null): Promise<CustomInviteLink> => {
+    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+    
+    const inviteId = doc(collection(db, 'invites')).id;
+    const expiresAt = expiresHours ? Date.now() + expiresHours * 60 * 60 * 1000 : null;
+    const chatObj = chats.find(c => c.id === chatId);
+    const cachedTitle = chatObj?.title || 'Private Group';
+
+    const linkObj: CustomInviteLink = {
+      id: inviteId,
+      chatId,
+      chatTitle: cachedTitle,
+      creatorId: currentUser.uid,
+      creatorName: userProfile.displayName || userProfile.email || 'Admin',
+      createdAt: Date.now(),
+      expiresAt,
+      usageLimit,
+      usageCount: 0,
+      isRevoked: false
+    };
+
+    await setDoc(doc(db, 'invites', inviteId), linkObj);
+    
+    // Update inviteLink on chat metadata to represent the active URL
+    await updateDoc(doc(db, 'chats', chatId), {
+      inviteLink: `https://vi-messenger.app/join/${inviteId}`
+    });
+
+    return linkObj;
+  };
+
+  const revokeInviteLink = async (inviteId: string) => {
+    const inviteRef = doc(db, 'invites', inviteId);
+    await updateDoc(inviteRef, {
+      isRevoked: true
+    });
+  };
+
+  const submitJoinRequest = async (chatId: string, reason?: string) => {
+    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+    
+    const requestId = `${currentUser.uid}_${chatId}`;
+    const targetChat = chats.find(c => c.id === chatId);
+    const chatTitle = targetChat?.title || 'Private Chat';
+
+    const requestObj: JoinRequest = {
+      id: requestId,
+      userId: currentUser.uid,
+      userDisplayName: userProfile.displayName || 'User',
+      userPhotoURL: userProfile.photoURL || `https://api.dicebear.com/7.x/adventurer/svg?seed=${currentUser.uid}`,
+      chatId,
+      chatTitle,
+      status: 'pending',
+      reason: reason || '',
+      createdAt: Date.now()
+    };
+
+    await setDoc(doc(db, 'joinRequests', requestId), requestObj);
+  };
+
+  const handleJoinRequest = async (requestId: string, action: 'approved' | 'rejected') => {
+    if (!currentUser) throw new Error('Not authenticated');
+    const reqDoc = doc(db, 'joinRequests', requestId);
+    const reqSnap = await getDoc(reqDoc);
+    if (!reqSnap.exists()) return;
+    const requestData = reqSnap.data() as JoinRequest;
+
+    if (action === 'approved') {
+      const chatRef = doc(db, 'chats', requestData.chatId);
+      await updateDoc(chatRef, {
+        members: arrayUnion(requestData.userId),
+        [`unreadCounts.${requestData.userId}`]: 0
+      });
+      await updateDoc(reqDoc, {
+        status: 'approved'
+      });
+      
+      // Auto welcome system message
+      const systemMsgId = doc(collection(db, 'messages')).id;
+      const systemMsg: Message = {
+        id: systemMsgId,
+        chatId: requestData.chatId,
+        senderId: 'SYSTEM',
+        senderName: 'VI Assistant',
+        senderPhotoURL: 'https://img.icons8.com/color/192/speech-bubble.png',
+        text: `Join Request Approved: ${requestData.userDisplayName} has been welcomed into this chat.`,
+        type: 'text',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        readBy: [currentUser.uid]
+      };
+      await setDoc(doc(db, 'messages', systemMsgId), systemMsg);
+    } else {
+      await updateDoc(reqDoc, {
+        status: 'rejected'
+      });
+    }
   };
 
   const updateGroupInfo = async (chatId: string, title: string, description?: string, photoURL?: string) => {
@@ -1357,6 +1677,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const saveChatDraft = async (chatId: string, text: string) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, 'chats', chatId), {
+        [`drafts.${currentUser.uid}`]: text
+      });
+    } catch (e: any) {
+      logger.warn("Failed saving draft to cloud:", { error: e.message });
+    }
+  };
+
   const editMessage = async (messageId: string, newText: string) => {
     const existingMsg = messages.find(m => m.id === messageId);
     const entry = { text: existingMsg?.text || '', updatedAt: Date.now() };
@@ -1379,11 +1710,50 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
   };
 
+  const saveMessageToFavorites = async (originalMsg: Message) => {
+    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+
+    // Make sure 'Saved Messages' self-chat exists
+    let savedChat = chats.find(c => c.type === 'direct' && c.members.length === 1 && c.members[0] === currentUser.uid);
+    if (!savedChat) {
+       savedChat = await createDirectChat(userProfile);
+    }
+
+    const newMsgId = doc(collection(db, 'messages')).id;
+    const copiedMsg: Message = {
+      ...originalMsg,
+      id: newMsgId,
+      chatId: savedChat.id,
+      senderId: currentUser.uid,
+      senderName: userProfile.displayName,
+      senderPhotoURL: userProfile.photoURL || '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      readBy: [currentUser.uid],
+      reactions: {},
+      forwardFrom: {
+         id: originalMsg.id,
+         senderId: originalMsg.senderId,
+         senderName: originalMsg.senderName,
+      }
+    };
+
+    await setDoc(doc(db, 'messages', newMsgId), copiedMsg);
+  };
+
   const addMessageReaction = async (messageId: string, emoji: string) => {
     if (!currentUser) return;
-    await updateDoc(doc(db, 'messages', messageId), {
-      [`reactions.${currentUser.uid}`]: emoji
-    });
+    const targetMsg = messages.find(m => m.id === messageId);
+    if (targetMsg && targetMsg.reactions && targetMsg.reactions[currentUser.uid] === emoji) {
+      const { deleteField } = await import('firebase/firestore');
+      await updateDoc(doc(db, 'messages', messageId), {
+        [`reactions.${currentUser.uid}`]: deleteField()
+      });
+    } else {
+      await updateDoc(doc(db, 'messages', messageId), {
+        [`reactions.${currentUser.uid}`]: emoji
+      });
+    }
   };
 
   const pinMessage = async (chatId: string, messageId: string | null) => {
@@ -1720,8 +2090,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       sendStickerMessage,
       uploadSticker,
       sendTypingStatus,
+      saveChatDraft,
       editMessage,
       deleteMessage,
+      saveMessageToFavorites,
       addMessageReaction,
       removeMessageReaction,
       pinMessage,
@@ -1755,7 +2127,18 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setSelectedUserProfile,
       addMemberToChat,
       joinChatByInviteCode,
-      updateGroupInfo
+      updateGroupInfo,
+      updateChatDetails,
+      updateMemberRole,
+      kickMember,
+      banMember,
+      unbanMember,
+      muteMember,
+      unmuteMember,
+      generateInviteLink,
+      revokeInviteLink,
+      submitJoinRequest,
+      handleJoinRequest
     }}>
       {children}
     </MessengerContext.Provider>

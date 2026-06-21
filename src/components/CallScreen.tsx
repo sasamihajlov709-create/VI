@@ -199,11 +199,16 @@ export const CallScreen: React.FC = () => {
 
     return () => {
       // Cleanup streams and RTCPeerConnection tracks on teardown
-      if (localMediaStream) {
-        localMediaStream.getTracks().forEach(track => track.stop());
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => {
+          track.stop();
+          logger.info(`Stopped audio/video track on teardown: ${track.kind}`);
+        });
+        localStreamRef.current = null;
       }
-      if (pc) {
-        pc.close();
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
       }
     };
   }, [ongoingCall?.status, ongoingCall?.id]);

@@ -1,83 +1,168 @@
 {
-  "collections": {
-    "users": {
-      "schema": {
-        "uid": "string",
-        "displayName": "string",
-        "username": "string",
-        "email": "string",
-        "photoURL": "string",
-        "bio": "string",
-        "statusMessage": "string",
-        "onlineStatus": "string",
-        "lastSeen": "number",
-        "createdAt": "number"
-      }
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information representing a single app participant",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique user reference" },
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "username": { "type": "string", "description": "Unique @username tag" },
+        "email": { "type": "string", "description": "User email address" },
+        "photoURL": { "type": "string", "description": "Avatar URL" },
+        "bio": { "type": "string", "description": "About me profile description" },
+        "statusMessage": { "type": "string", "description": "Custom status message" },
+        "onlineStatus": { "type": "string", "description": "Online, offline status indicator" },
+        "lastSeen": { "type": "number", "description": "Epoch timestamp of last interaction" },
+        "createdAt": { "type": "number", "description": "Epoch timestamp when user profile was created" }
+      },
+      "required": ["uid"]
     },
-    "chats": {
-      "schema": {
-        "id": "string",
-        "type": "string",
-        "title": "string",
-        "photoURL": "string",
-        "members": "array",
-        "admins": "array",
-        "creatorId": "string",
-        "createdAt": "number",
-        "updatedAt": "number",
-        "pinnedIds": "array",
-        "archivedIds": "array",
-        "muteIds": "array",
-        "unreadCounts": "map"
-      }
+    "Chat": {
+      "title": "Chat",
+      "description": "Direct conversation, channel, or group chat metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Conversation unique ID" },
+        "type": { "type": "string", "description": "Type of converse: 'direct', 'group', 'channel'" },
+        "title": { "type": "string", "description": "Title designation" },
+        "photoURL": { "type": "string", "description": "Group/Channel cover picture" },
+        "members": { "type": "array", "description": "List of user UIDs belonging here" },
+        "admins": { "type": "array", "description": "List of administrator UIDs" },
+        "creatorId": { "type": "string", "description": "UID of the creator" },
+        "createdAt": { "type": "number", "description": "Epoch timestamp of chat group creation" },
+        "updatedAt": { "type": "number", "description": "Epoch timestamp of last activity key" },
+        "pinnedIds": { "type": "array", "description": "List of UIDs who pinned this chat in list" },
+        "archivedIds": { "type": "array", "description": "List of UIDs who archived this chat" },
+        "muteIds": { "type": "array", "description": "List of UIDs who muted notifications for this chat" },
+        "unreadCounts": { "type": "object", "description": "Map mapping user UIDs to count numbers" }
+      },
+      "required": ["id", "type"]
     },
-    "messages": {
-      "schema": {
-        "id": "string",
-        "chatId": "string",
-        "senderId": "string",
-        "senderName": "string",
-        "senderPhotoURL": "string",
-        "text": "string",
-        "type": "string",
-        "fileUrl": "string",
-        "fileName": "string",
-        "fileSize": "number",
-        "duration": "number",
-        "createdAt": "number",
-        "updatedAt": "number",
-        "replyTo": "map",
-        "forwardFrom": "map",
-        "reactions": "map",
-        "readBy": "array"
-      }
+    "Message": {
+      "title": "Message",
+      "description": "Individual message content data entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Message identity indicator" },
+        "chatId": { "type": "string", "description": "Belongs to Chat ID container" },
+        "senderId": { "type": "string", "description": "Sender UID index" },
+        "senderName": { "type": "string", "description": "Readable sender display name" },
+        "senderPhotoURL": { "type": "string", "description": "Thumbnail image of sender" },
+        "text": { "type": "string", "description": "Written chat text content" },
+        "type": { "type": "string", "description": "Format text, sticker, image, voice, file etc." },
+        "fileUrl": { "type": "string", "description": "Uploaded storage reference URL" },
+        "fileName": { "type": "string", "description": "Standard filename" },
+        "fileSize": { "type": "number", "description": "Byte count magnitude" },
+        "duration": { "type": "number", "description": "Media play duration in seconds" },
+        "createdAt": { "type": "number", "description": "Timestamp message was recorded" },
+        "updatedAt": { "type": "number", "description": "Timestamp edit status changed" },
+        "replyTo": { "type": "object", "description": "Optional parent message outline if replying" },
+        "forwardFrom": { "type": "object", "description": "Optional original sender info if forwarding" },
+        "reactions": { "type": "object", "description": "Key value mapping for active reactions" },
+        "readBy": { "type": "array", "description": "List of user UIDs who read this" }
+      },
+      "required": ["id", "chatId", "senderId", "createdAt"]
     },
-    "calls": {
-      "schema": {
-        "id": "string",
-        "callerId": "string",
-        "callerName": "string",
-        "callerPhotoURL": "string",
-        "receiverId": "string",
-        "status": "string",
-        "type": "string",
-        "createdAt": "number",
-        "endedAt": "number"
-      }
+    "Call": {
+      "title": "Call",
+      "description": "VoIP audio and video active signaling record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Signaling room identifier" },
+        "callerId": { "type": "string", "description": "Initiator UID lookup" },
+        "callerName": { "type": "string", "description": "Brief name of the caller" },
+        "callerPhotoURL": { "type": "string", "description": "Avatar picture link" },
+        "receiverId": { "type": "string", "description": "Recipient target UID" },
+        "status": { "type": "string", "description": "Call status: calling, progress, ended, missed" },
+        "type": { "type": "string", "description": "Voice call vs. Video Call flag" },
+        "createdAt": { "type": "number", "description": "Creation timestamp epoch" },
+        "endedAt": { "type": "number", "description": "Closing time indicators" }
+      },
+      "required": ["id", "callerId", "receiverId", "status", "createdAt"]
     },
-    "stories": {
-      "schema": {
-        "id": "string",
-        "userId": "string",
-        "userDisplayName": "string",
-        "userPhotoURL": "string",
-        "mediaUrl": "string",
-        "mediaType": "string",
-        "createdAt": "number",
-        "expiresAt": "number",
-        "views": "array",
-        "reactions": "map"
-      }
+    "Story": {
+      "title": "Story",
+      "description": "Stories tab visual update record valid for 24h",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Story UID element" },
+        "userId": { "type": "string", "description": "Poster UID" },
+        "userDisplayName": { "type": "string", "description": "Poster user name" },
+        "userPhotoURL": { "type": "string", "description": "Avatar logo image link" },
+        "mediaUrl": { "type": "string", "description": "Stored image or video resource" },
+        "mediaType": { "type": "string", "description": "File category tag" },
+        "createdAt": { "type": "number", "description": "Timestamp of story publish" },
+        "expiresAt": { "type": "number", "description": "Timestamp when deleted" },
+        "views": { "type": "array", "description": "Members who watched" },
+        "reactions": { "type": "object", "description": "Emoji response keys" }
+      },
+      "required": ["id", "userId", "mediaUrl", "createdAt", "expiresAt"]
+    },
+    "CustomInviteLink": {
+      "title": "CustomInviteLink",
+      "description": "Custom chat invite links generated by admin/owner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique link code" },
+        "chatId": { "type": "string", "description": "Target chat ID" },
+        "chatTitle": { "type": "string", "description": "Cached chat title" },
+        "creatorId": { "type": "string", "description": "Creator UID" },
+        "creatorName": { "type": "string", "description": "Creator display name" },
+        "createdAt": { "type": "number", "description": "Time generated" },
+        "expiresAt": { "type": "number", "description": "Expiration timestamp" },
+        "usageLimit": { "type": "number", "description": "Maximum entries allowed" },
+        "usageCount": { "type": "number", "description": "Active usage count" },
+        "isRevoked": { "type": "boolean", "description": "Revoked state flag" }
+      },
+      "required": ["id", "chatId", "creatorId", "createdAt", "isRevoked"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Requests to join private group/channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique request target ID" },
+        "userId": { "type": "string", "description": "Requestor's UID" },
+        "userDisplayName": { "type": "string", "description": "Requestor's name" },
+        "userPhotoURL": { "type": "string", "description": "Requestor's avatar url" },
+        "chatId": { "type": "string", "description": "Destination chat ID" },
+        "chatTitle": { "type": "string", "description": "Destination chat name" },
+        "status": { "type": "string", "description": "pending, approved, or rejected" },
+        "reason": { "type": "string", "description": "User custom rationale" },
+        "createdAt": { "type": "number", "description": "Creation time indicator" }
+      },
+      "required": ["id", "userId", "chatId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Profiles collection metadata config location"
+    },
+    "chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Messaging conversation groups and channels"
+    },
+    "messages/{messageId}": {
+      "schema": "Message",
+      "description": "Shared message stream items inside threads"
+    },
+    "calls/{callId}": {
+      "schema": "Call",
+      "description": "Active WebRTC audio-video call rings"
+    },
+    "stories/{storyId}": {
+      "schema": "Story",
+      "description": "Dynamic temporary content slider"
+    },
+    "invites/{inviteId}": {
+      "schema": "CustomInviteLink",
+      "description": "Chat invite codes for direct sign-ups"
+    },
+    "joinRequests/{requestId}": {
+      "schema": "JoinRequest",
+      "description": "Private chats access request line queue"
     }
   }
 }

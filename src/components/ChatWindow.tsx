@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Phone, 
@@ -35,7 +35,12 @@ import {
   MessageSquare,
   Lock,
   Clock,
-  Square
+  Square,
+  Bookmark,
+  Info,
+  Sparkles,
+  UserCheck,
+  Globe
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -43,6 +48,7 @@ import { Message, UserProfile } from '../types';
 import { logger } from '../lib/logger';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import TextareaAutosize from 'react-textarea-autosize';
 
 const DEFAULT_STICKERS = [
   'https://api.dicebear.com/7.x/fun-emoji/svg?seed=happy',
@@ -162,6 +168,13 @@ const AudioWavePlayer: React.FC<{ src: string, duration?: number }> = ({ src, du
     const audio = audioRef.current;
     if (!audio) return;
     
+    // Some browsers return Infinity for WebM duration until played or completely loaded
+    const checkDuration = () => {
+      if (audio.duration && audio.duration !== Infinity && duration === undefined) {
+        // use audio.duration if no duration prop
+      }
+    };
+
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
@@ -170,20 +183,26 @@ const AudioWavePlayer: React.FC<{ src: string, duration?: number }> = ({ src, du
       setCurrentTime(0);
     };
 
+    audio.addEventListener('loadedmetadata', checkDuration);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
 
     return () => {
+      audio.removeEventListener('loadedmetadata', checkDuration);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('ended', onEnded);
     };
-  }, []);
+  }, [duration]);
 
-  const totalDuration = duration || (audioRef.current ? (isNaN(audioRef.current.duration) || audioRef.current.duration === Infinity ? 0 : audioRef.current.duration) : 0) || 0;
+  // Use provided duration from prop, fallback to audio element duration, default to 0
+  const totalDuration = duration 
+    ? duration 
+    : (audioRef.current && isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
+    
   const progressRatio = totalDuration > 0 ? (currentTime / totalDuration) : 0;
 
   // stable wave bars based on src hashing
@@ -268,6 +287,8 @@ const AudioWavePlayer: React.FC<{ src: string, duration?: number }> = ({ src, du
   );
 };
 
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+
 export const ChatWindow: React.FC = () => {
   const { 
     currentUser, 
@@ -284,8 +305,10 @@ export const ChatWindow: React.FC = () => {
     sendStickerMessage,
     uploadSticker,
     sendTypingStatus,
+    saveChatDraft,
     editMessage,
     deleteMessage,
+    saveMessageToFavorites,
     addMessageReaction,
     pinMessage,
     sendPollMessage,
@@ -310,6 +333,45 @@ export const ChatWindow: React.FC = () => {
 
   // Core inputs state machinery
   const [inputText, setInputText] = useState('');
+  const draftTimeoutRef = useRef<any>(null);
+
+  // Pagination & performance optimization states for long chat histories
+  const [renderLimit, setRenderLimit] = useState(50);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const prevScrollHeightRef = useRef<number>(0);
+  const prevScrollTopRef = useRef<number>(0);
+
+  // Sync and Restore Drafts
+  useEffect(() => {
+    if (!activeChat || !currentUser) return;
+
+    // Load draft for new active chat
+    const localDraft = localStorage.getItem(`vi_draft_${activeChat.id}`);
+    const cloudDraft = activeChat.drafts?.[currentUser.uid] || '';
+    
+    // Prioritize Cloud draft if newer/exists, fall back to local draft
+    const draftToLoad = cloudDraft !== undefined && cloudDraft !== '' ? cloudDraft : (localDraft || '');
+    setInputText(draftToLoad);
+
+    return () => {
+      if (draftTimeoutRef.current) clearTimeout(draftTimeoutRef.current);
+    };
+  }, [activeChat?.id]);
+
+  const handleInputChange = (text: string) => {
+    setInputText(text);
+    if (!activeChat) return;
+
+    // Immediate local persistence
+    localStorage.setItem(`vi_draft_${activeChat.id}`, text);
+
+    // Debounce cloud persistence to avoid Firestore bill overhead
+    if (draftTimeoutRef.current) clearTimeout(draftTimeoutRef.current);
+    draftTimeoutRef.current = setTimeout(() => {
+      saveChatDraft(activeChat.id, text);
+    }, 1200);
+  };
+
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -326,6 +388,8 @@ export const ChatWindow: React.FC = () => {
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showAttachmentDropdown, setShowAttachmentDropdown] = useState(false);
   
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
   // Poll state variables
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptionsInput, setPollOptionsInput] = useState('');
@@ -334,26 +398,58 @@ export const ChatWindow: React.FC = () => {
   
   const [isSilent, setIsSilent] = useState(false);
   const [scheduledTime, setScheduledTime] = useState<number | null>(null);
+  const [initialUnreadId, setInitialUnreadId] = useState<string | null>(null);
+  const currentChatIdRef = useRef<string | null>(null);
 
-  // Live Sound Recording parameters
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordDuration, setRecordDuration] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const durationTimerRef = useRef<any>(null);
+  useEffect(() => {
+    if (!activeChat) {
+       currentChatIdRef.current = null;
+       setInitialUnreadId(null);
+       return;
+    }
+    if (activeChat.id !== currentChatIdRef.current) {
+       currentChatIdRef.current = activeChat.id;
+       const firstUnread = messages.find(m => currentUser && m.senderId !== currentUser.uid && !m.readBy?.includes(currentUser.uid));
+       setInitialUnreadId(firstUnread ? firstUnread.id : null);
+    }
+  }, [activeChat?.id, messages, currentUser?.uid]);
 
-  // Premium voice recording gesture states
-  const [recordingState, setRecordingState] = useState<'idle' | 'holding' | 'locked'>('idle');
-  const [recordGestures, setRecordGestures] = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
-  const [recordingAmplitudes, setRecordingAmplitudes] = useState<number[]>([]);
-  const [voicePreviewBlob, setVoicePreviewBlob] = useState<Blob | null>(null);
-  const [voicePreviewDuration, setVoicePreviewDuration] = useState<number>(0);
-  
-  const recordDurationRef = useRef<number>(0);
-  const shouldSendOnStopRef = useRef<boolean>(true);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const recordingStartTimeRef = useRef<number>(0);
+  const {
+    isRecording,
+    recordDuration,
+    recordingState,
+    recordGestures,
+    recordingAmplitudes,
+    voicePreviewBlob,
+    voicePreviewUrl,
+    voicePreviewDuration,
+    handleRecordStart: startRecording,
+    handleRecordMove,
+    handleRecordRelease,
+    cancelRecording,
+    stopRecording,
+    sendPreviewVoiceMessage,
+    resetRecordingState,
+    setRecordingState,
+    shouldSendOnStopRef
+  } = useVoiceRecorder(sendVoiceMessage);
+
+  const handleEmojiInsert = (emoji: string) => {
+    setInputText((prev) => prev + emoji);
+  };
+
+  const handleCustomStickerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploadingSticker(true);
+      await uploadSticker(file);
+    } catch (err: any) {
+      alert(language === 'ru' ? 'Ошибка загрузки стикера: ' + err.message : 'Error uploading sticker: ' + err.message);
+    } finally {
+      setUploadingSticker(false);
+    }
+  };
 
   // Live Circular Camera Recording parameters
   const [isRecordingVideo, setIsRecordingVideo] = useState(false);
@@ -428,6 +524,26 @@ export const ChatWindow: React.FC = () => {
     return list.sort((a, b) => a.createdAt - b.createdAt);
   }, [messages, viewScheduledMode, activeChat, activeTopicId, searchInChatQuery]);
 
+  // Slice to only render up to the latest `renderLimit` messages for UI rendering performance
+  const paginatedMessages = useMemo(() => {
+    if (visibleMessages.length <= renderLimit) {
+      return visibleMessages;
+    }
+    return visibleMessages.slice(visibleMessages.length - renderLimit);
+  }, [visibleMessages, renderLimit]);
+
+  // Adjust scroll position when older messages are loaded at the top to prevent scroll jumps
+  useLayoutEffect(() => {
+    if (scrollContainerRef.current && prevScrollHeightRef.current > 0) {
+      const { scrollHeight } = scrollContainerRef.current;
+      const heightDifference = scrollHeight - prevScrollHeightRef.current;
+      if (heightDifference > 0) {
+        scrollContainerRef.current.scrollTop = prevScrollTopRef.current + heightDifference;
+      }
+      prevScrollHeightRef.current = 0;
+    }
+  }, [paginatedMessages.length]);
+
   // Who is typing parsing (throttle 5 seconds)
   const typingUsers = useMemo(() => {
     if (!activeChat || !activeChat.typing) return [];
@@ -441,265 +557,77 @@ export const ChatWindow: React.FC = () => {
   }, [activeChat, globalUsers, currentUser, language]);
 
   // Keep bottom-scrolled automatically on message list expansion/height change
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((smooth = false) => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight + 10000;
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
+      });
     }
   }, []);
+  
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  
+  const handleScroll = useCallback(() => {
+    if (scrollContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      setIsAtBottom(scrollHeight - scrollTop - clientHeight < 150);
 
+      // Trigger loads for older history when scrolling past top threshold (< 80px)
+      if (scrollTop < 80 && !isLoadingMore && visibleMessages.length > renderLimit) {
+        setIsLoadingMore(true);
+        prevScrollHeightRef.current = scrollHeight;
+        prevScrollTopRef.current = scrollTop;
+        
+        // Timeout debounce simulates natural smooth visual loading
+        setTimeout(() => {
+          setRenderLimit(prev => Math.min(prev + 50, visibleMessages.length));
+          setIsLoadingMore(false);
+        }, 400);
+      }
+    }
+  }, [visibleMessages.length, renderLimit, isLoadingMore]);
+
+  const activeMenuMessage = activeMessageMenuId ? visibleMessages.find(m => m.id === activeMessageMenuId) : null;
+
+  // When active chat fundamentally changes or loads for the first time
   useEffect(() => {
-    scrollToBottom();
-  }, [messages?.length, visibleMessages.length, activeChat?.id, scrollToBottom]);
+    if (!scrollContainerRef.current) return;
+    
+    // Reset chunk limit on chat context swap
+    setRenderLimit(50);
+    setIsLoadingMore(false);
+    prevScrollHeightRef.current = 0;
+    prevScrollTopRef.current = 0;
+    
+    if (initialUnreadId) {
+      // Jump to unread
+      setTimeout(() => {
+        const el = document.getElementById(`msg-${initialUnreadId}`);
+        if (el && scrollContainerRef.current) {
+          el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        }
+      }, 50);
+    } else {
+      setTimeout(() => scrollToBottom(false), 50);
+    }
+  }, [activeChat?.id, initialUnreadId, scrollToBottom]);
+
+  // When new messages arrive on the active thread
+  useEffect(() => {
+     if (isAtBottom && paginatedMessages.length > 0) {
+        scrollToBottom(true);
+     }
+  }, [paginatedMessages.length, isAtBottom, scrollToBottom]);
 
   // Trigger scroll to bottom on keyboard popup or focus states
   useEffect(() => {
     const handleViewportResize = () => {
-      scrollToBottom();
+      if (isAtBottom) scrollToBottom();
     };
     window.addEventListener('resize', handleViewportResize);
     return () => window.removeEventListener('resize', handleViewportResize);
-  }, [scrollToBottom]);
-
-  // Custom Sticker File Uploader callback
-  const handleCustomStickerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingSticker(true);
-    try {
-      await uploadSticker(file);
-    } catch (err: any) {
-      logger.error("Failed to upload custom sticker:", { error: err.message });
-    } finally {
-      setUploadingSticker(false);
-    }
-  };
-
-  // Keyboard live emoji insert helper preserving click-focus sync
-  const handleEmojiInsert = (emoji: string) => {
-    setInputText(prev => prev + emoji);
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 20);
-  };
-
-  // Voice Note Media Capture
-  const resetRecordingState = () => {
-    setIsRecording(false);
-    setRecordingState('idle');
-    setRecordDuration(0);
-    recordDurationRef.current = 0;
-    setVoicePreviewBlob(null);
-    setVoicePreviewDuration(0);
-    setRecordingAmplitudes([]);
-    if (durationTimerRef.current) {
-      clearInterval(durationTimerRef.current);
-    }
-  };
-
-  const startRecording = async (clientX?: number, clientY?: number) => {
-    if (cooldownRemaining > 0) {
-      alert(language === 'ru' ? `Медленный режим активен. Подождите ${cooldownRemaining}с.` : `Slow mode is active. Please wait ${cooldownRemaining}s.`);
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      const mimeTypes = ['audio/webm', 'audio/mp4', 'audio/ogg'];
-      let chosenMimeType = '';
-      // Default to empty string if isTypeSupported is undefined (some older browsers)
-      if (typeof MediaRecorder.isTypeSupported === 'function') {
-        for (const mt of mimeTypes) {
-          if (MediaRecorder.isTypeSupported(mt)) {
-            chosenMimeType = mt;
-            break;
-          }
-        }
-      }
-
-      const mediaRecorder = new MediaRecorder(stream, chosenMimeType ? { mimeType: chosenMimeType } : undefined);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: chosenMimeType || 'audio/webm' });
-        
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-        }
-
-        if (audioBlob.size > 10) {
-          const finalDuration = Math.max(1, recordDurationRef.current || 1);
-          if (shouldSendOnStopRef.current) {
-            try {
-              await sendVoiceMessage(audioBlob, finalDuration);
-            } catch (err: any) {
-              logger.error("Failed to send voice message during onstop", { error: err.message, stack: err.stack });
-            } finally {
-              resetRecordingState();
-            }
-          } else {
-            setVoicePreviewBlob(audioBlob);
-            setVoicePreviewDuration(finalDuration);
-          }
-        } else {
-          resetRecordingState();
-        }
-      };
-
-      shouldSendOnStopRef.current = true;
-      mediaRecorder.start();
-      recordingStartTimeRef.current = Date.now();
-      setIsRecording(true);
-      setRecordingState(clientX !== undefined ? 'holding' : 'locked');
-
-      if (clientX !== undefined && clientY !== undefined) {
-        setRecordGestures({
-          startX: clientX,
-          startY: clientY,
-          currentX: clientX,
-          currentY: clientY
-        });
-      }
-
-      setRecordDuration(0);
-      recordDurationRef.current = 0;
-
-      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
-      durationTimerRef.current = setInterval(() => {
-        setRecordDuration(prev => {
-          const next = prev + 1;
-          recordDurationRef.current = next;
-          return next;
-        });
-      }, 1000);
-
-      // Web Audio stream frequency level mapping
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const audioContext = new AudioCtx();
-          audioContextRef.current = audioContext;
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 64;
-          source.connect(analyser);
-          
-          const bufferLength = analyser.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
-          
-          const updateAmplitudes = () => {
-            if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== "recording") {
-              return;
-            }
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < bufferLength; i++) {
-              sum += dataArray[i];
-            }
-            const average = sum / bufferLength;
-            const normVal = 4 + Math.min(30, (average / 140) * 30);
-            setRecordingAmplitudes(prev => {
-              const next = [...prev, normVal];
-              if (next.length > 25) next.shift();
-              return next;
-            });
-            requestAnimationFrame(updateAmplitudes);
-          };
-          requestAnimationFrame(updateAmplitudes);
-        }
-      } catch (err: any) {
-        logger.warn("Waveform dynamic AnalysisContext offline:", { error: err?.message, stack: err?.stack });
-      }
-    } catch (e: any) {
-      logger.error("Audio recording microphone capture failed:", { error: e?.message, stack: e?.stack });
-      // Remove alert if you prefer entirely quiet degradation, but keeping it for user feedback
-      alert(language === 'ru' ? "Доступ к микрофону отклонен или отключен. Не удается записать аудиосообщение." : "Microphone permission denied. Unable to capture live voice note.");
-      resetRecordingState();
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-    }
-  };
-
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current.stop();
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-    }
-    resetRecordingState();
-  };
-
-  const handleRecordMove = (clientX: number, clientY: number) => {
-    if (recordingState !== 'holding') return;
-    
-    setRecordGestures(prev => {
-      const current = { ...prev, currentX: clientX, currentY: clientY };
-      
-      const distanceX = prev.startX - clientX;
-      const distanceY = prev.startY - clientY;
-      
-      if (distanceX > 80) {
-        setTimeout(() => {
-          cancelRecording();
-        }, 10);
-      } else if (distanceY > 60) {
-        setRecordingState('locked');
-      }
-      
-      return current;
-    });
-  };
-
-  const handleRecordRelease = () => {
-    if (recordingState === 'holding') {
-      const distanceX = recordGestures.startX - recordGestures.currentX;
-      const distanceY = recordGestures.startY - recordGestures.currentY;
-      const holdDuration = Date.now() - recordingStartTimeRef.current;
-      
-      if (holdDuration < 350) {
-        // Simple short click/tap - auto-lock so they can use on-screen buttons
-        setRecordingState('locked');
-      } else if (distanceX > 80) {
-        cancelRecording();
-      } else if (distanceY > 60) {
-        setRecordingState('locked');
-      } else {
-        shouldSendOnStopRef.current = true;
-        stopRecording();
-      }
-    }
-  };
-
-  const sendPreviewVoiceMessage = async () => {
-    if (!voicePreviewBlob) return;
-    try {
-      const finalDuration = voicePreviewDuration || 1;
-      await sendVoiceMessage(voicePreviewBlob, finalDuration);
-    } catch (err: any) {
-      logger.error("Failed to send preview voice message:", { error: err.message, stack: err.stack });
-    } finally {
-      resetRecordingState();
-    }
-  };
+  }, [isAtBottom, scrollToBottom]);
 
   // Video Note Circular camera recording
   const startVideoRecording = async () => {
@@ -779,6 +707,13 @@ export const ChatWindow: React.FC = () => {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleMessageSend(e as unknown as React.FormEvent);
+    }
+  };
+
   // Submit messages
   const handleMessageSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -817,6 +752,11 @@ export const ChatWindow: React.FC = () => {
     setReplyTarget(null);
     setIsSilent(false);
     setScheduledTime(null);
+    
+    if (activeChat) {
+      localStorage.removeItem(`vi_draft_${activeChat.id}`);
+      saveChatDraft(activeChat.id, '');
+    }
     
     // Smoothly focus input keyboard to facilitate continuous messaging
     setTimeout(() => {
@@ -858,15 +798,152 @@ export const ChatWindow: React.FC = () => {
   };
 
   if (!activeChat) {
+    const getGreeting = () => {
+      const hours = new Date().getHours();
+      if (hours < 6) return language === 'ru' ? 'Доброй ночи' : 'Good night';
+      if (hours < 12) return language === 'ru' ? 'Доброе утро' : 'Good morning';
+      if (hours < 18) return language === 'ru' ? 'Добрый день' : 'Good afternoon';
+      return language === 'ru' ? 'Добрый вечер' : 'Good evening';
+    };
+
+    const contactSuggestions = (globalUsers || [])
+      .filter(u => currentUser && u.uid !== currentUser.uid)
+      .slice(0, 3);
+
     return (
-      <div className="hidden md:flex flex-1 bg-transparent flex-col items-center justify-center p-8 text-center text-slate-500 h-full select-none">
-        <div className="w-20 h-20 rounded-full glass-panel glass-highlight flex items-center justify-center mb-4 text-[var(--glass-accent)]">
-          <FolderLock className="w-9 h-9" />
+      <div className="hidden md:flex flex-1 bg-[#09090A] flex-col p-8 md:p-12 overflow-y-auto h-full justify-center select-none">
+        <div className="max-w-3xl w-full mx-auto space-y-8 animate-fade-in-up">
+          
+          {/* Main welcome banner with dynamic greeting & user avatar */}
+          <div className="flex flex-col md:flex-row items-center md:items-start gap-6 bg-white/[0.02] border border-white/5 p-6 md:p-8 rounded-3xl backdrop-blur-md relative overflow-hidden shadow-xl">
+            <div className="absolute top-0 right-0 w-36 h-36 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
+            
+            <div className="relative shrink-0">
+              <img 
+                src={userProfile?.photoURL || 'https://api.dicebear.com/7.x/adventurer/svg'} 
+                alt="Profile" 
+                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-2 border-[var(--glass-accent)] shadow-lg shadow-cyan-500/10"
+              />
+              <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-[#121215] shadow-inner" />
+            </div>
+            
+            <div className="text-center md:text-left space-y-2 min-w-0 flex-1">
+              <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-accent)] font-mono px-2.5 py-1 bg-cyan-500/10 rounded-full border border-cyan-500/10">
+                {language === 'ru' ? 'Добро пожаловать' : 'Welcome to VI'}
+              </span>
+              <h1 className="text-2xl md:text-3xl font-extrabold text-slate-100 tracking-tight leading-none mt-2">
+                {getGreeting()}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-sky-400 font-black">{userProfile?.displayName}</span>!
+              </h1>
+              <p className="text-xs text-slate-400 font-medium font-mono">@{userProfile?.username}</p>
+              
+              {userProfile?.bio && (
+                <p className="text-xs text-slate-400 leading-relaxed bg-black/20 p-2.5 rounded-xl border border-white/[0.03] mt-3">
+                  <span className="font-mono text-[9px] text-slate-500 block uppercase tracking-wider mb-0.5">{language === 'ru' ? 'О себе' : 'Bio'}</span>
+                  {userProfile.bio}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Bento-style dashboard grids */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            
+            {/* Bento Card 1: Saved Messages shortcut */}
+            <div 
+              onClick={async () => {
+                if (userProfile) {
+                  await createDirectChat(userProfile);
+                }
+              }}
+              className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl hover:bg-white/[0.04] hover:border-cyan-500/20 active:scale-[0.98] transition-all cursor-pointer flex flex-col justify-between group shadow-lg min-h-[180px]"
+            >
+              <div className="flex justify-between items-start">
+                <div className="p-3 bg-cyan-500/10 text-[var(--glass-accent)] rounded-2xl border border-cyan-500/15 group-hover:scale-110 transition-transform">
+                  <Bookmark className="w-6.5 h-6.5" />
+                </div>
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider">
+                  {language === 'ru' ? 'Избранное' : 'Cloud Sandbox'}
+                </span>
+              </div>
+              <div className="space-y-1.5 pt-4">
+                <h3 className="text-sm font-bold text-slate-200 group-hover:text-[var(--glass-accent)] transition-colors">
+                  {language === 'ru' ? 'Избранные сообщения' : 'Saved Messages'}
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                  {language === 'ru' 
+                    ? 'Ваше личное облачное хранилище для хранения файлов, текстовых заметок, ссылок и черновиков.' 
+                    : 'Your personal encrypted sandbox cloud to store files, voice notes, code snippets or drafts.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Bento Card 2: Contact suggestions */}
+            <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl shadow-lg min-h-[180px] flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-start mb-4">
+                  <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/15">
+                    <UserCheck className="w-6.5 h-6.5" />
+                  </div>
+                  <span className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider">
+                    {language === 'ru' ? 'Рекомендации' : 'Live Contacts'}
+                  </span>
+                </div>
+                
+                <h3 className="text-sm font-bold text-slate-200">
+                  {language === 'ru' ? 'Быстрый доступ к контактам' : 'Connect with Contacts'}
+                </h3>
+                
+                {contactSuggestions.length > 0 ? (
+                  <div className="space-y-2 mt-3">
+                    {contactSuggestions.map((u) => (
+                      <div 
+                        key={u.uid} 
+                        onClick={async () => {
+                          await createDirectChat(u);
+                        }}
+                        className="flex items-center justify-between p-2 rounded-xl bg-black/25 hover:bg-white/5 border border-white/5 hover:border-cyan-500/10 transition-all cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img src={u.photoURL} alt={u.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0" />
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold text-slate-200 truncate group-hover:text-[var(--glass-accent)]">{u.displayName}</h4>
+                            <p className="text-[10px] font-mono text-slate-500 truncate">@{u.username}</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold font-mono tracking-wider text-cyan-400 bg-cyan-500/10 border border-cyan-500/10 px-2 py-0.5 rounded-md uppercase">
+                          {language === 'ru' ? 'Чат' : 'Chat'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 font-sans mt-2">
+                    {language === 'ru' 
+                      ? 'Другие зарегистрированные пользователи пока не найдены.' 
+                      : 'No other active node users found in this workspace context.'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Quick tips & stats strip */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 px-6 bg-white/[0.01] border border-white/[0.03] rounded-2xl text-xs text-slate-450 select-none">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                {language === 'ru' 
+                  ? 'Совет: Проведите пальцем влево на сообщении для мгновенного ответа!' 
+                  : 'Pro Tip: Swipe left on any message for a lightning fast reply!'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] font-mono text-slate-500">
+              <span>Secure Ingress Protection ACTIVE</span>
+            </div>
+          </div>
+
         </div>
-        <h2 className="text-xl font-bold text-slate-200">{language === 'ru' ? 'Закрытый канал связи' : t.privateSecureIngress}</h2>
-        <p className="text-sm mt-1 text-slate-500 max-w-xs leading-relaxed font-sans">
-          {language === 'ru' ? 'Выберите диалог или создайте новую группу/канал на панели слева для начала общения.' : t.welcomeInstructions}
-        </p>
       </div>
     );
   }
@@ -1096,8 +1173,8 @@ export const ChatWindow: React.FC = () => {
       {/* Message Scrollable Window Stream */}
       <div 
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative bg-transparent flex flex-col gap-2.5 scroll-smooth"
-        style={{ scrollBehavior: 'smooth' }}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative bg-transparent flex flex-col gap-2.5 scroll-smooth custom-scrollbar"
       >
         {visibleMessages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-650 p-8 text-center select-none max-w-sm mx-auto my-auto py-16">
@@ -1113,7 +1190,7 @@ export const ChatWindow: React.FC = () => {
             const elements: React.ReactNode[] = [];
             let lastDateStr = '';
 
-            visibleMessages.forEach((msg, idx) => {
+            paginatedMessages.forEach((msg, idx) => {
               // 1. Group by day date separator headings
               const msgDate = new Date(msg.createdAt);
               const dateStr = msgDate.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'en-US', { 
@@ -1133,19 +1210,49 @@ export const ChatWindow: React.FC = () => {
                 );
               }
 
+              if (initialUnreadId === msg.id) {
+                elements.push(
+                  <div key="unread-separator" className="flex items-center w-full my-4 opacity-80 select-none">
+                    <div className="flex-1 border-t border-cyan-500/30"></div>
+                    <span className="px-3 text-[10px] uppercase font-bold tracking-wider text-cyan-400 bg-[#090909] rounded-full">
+                      {language === 'ru' ? 'Непрочитанные сообщения' : 'Unread Messages'}
+                    </span>
+                    <div className="flex-1 border-t border-cyan-500/30"></div>
+                  </div>
+                );
+              }
+
               const isMe = msg.senderId === currentUser?.uid;
               const isRead = msg.readBy && msg.readBy.length > 1;
 
               // 2. Continuous message grouping by the same user within 3 mins (Telegram style clustering)
-              const prevMsg = visibleMessages[idx - 1];
+              const prevMsg = paginatedMessages[idx - 1];
               const isConsecutive = prevMsg && prevMsg.senderId === msg.senderId && (msg.createdAt - prevMsg.createdAt < 3 * 60 * 1000);
 
               elements.push(
-                <div 
+                <motion.div 
                   key={msg.id}
                   id={`msg-${msg.id}`}
-                  className={`flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutive ? 'mt-0.5' : 'mt-2'}`}
+                  className={`flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutive ? 'mt-0.5' : 'mt-2'} relative`}
+                  drag="x"
+                  dragDirectionLock
+                  dragConstraints={{ left: 0, right: 0 }}
+                  dragElastic={{ left: 0.15, right: 0 }}
+                  onDragEnd={(e, info) => {
+                    if (info.offset.x < -40) {
+                       setReplyTarget(msg);
+                       if ('vibrate' in navigator) navigator.vibrate(20);
+                    }
+                  }}
+                  onContextMenu={(e: React.MouseEvent) => {
+                     e.preventDefault();
+                     setActiveMessageMenuId(msg.id);
+                  }}
                 >
+                  {/* Reply icon indicator that opacity-fades in when dragged */}
+                  <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 text-slate-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none" id={`reply-icon-${msg.id}`}>
+                     <Reply className="w-3.5 h-3.5" />
+                  </div>
                   {/* Left Avatar for other users (Hidden on consecutive piles) */}
                   {!isMe && (
                     <div 
@@ -1185,7 +1292,27 @@ export const ChatWindow: React.FC = () => {
 
                     {/* Highly stylized bubble with tail margins */}
                     <div 
-                      onClick={() => setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id)}
+                      onPointerDown={(e) => {
+                         const target = e.currentTarget;
+                         target.dataset.pointerDownStarted = Date.now().toString();
+                         target.dataset.longPressTriggered = 'false';
+                         target.dataset.timeoutId = setTimeout(() => {
+                           target.dataset.longPressTriggered = 'true';
+                           setActiveMessageMenuId(msg.id);
+                           if ('vibrate' in navigator) navigator.vibrate(20);
+                         }, 400).toString();
+                      }}
+                      onPointerUp={(e) => {
+                         const target = e.currentTarget;
+                         clearTimeout(parseInt(target.dataset.timeoutId || '0'));
+                         if (target.dataset.longPressTriggered !== 'true') {
+                            setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id);
+                         }
+                      }}
+                      onPointerCancel={(e) => {
+                         const target = e.currentTarget;
+                         clearTimeout(parseInt(target.dataset.timeoutId || '0'));
+                      }}
                       className={`relative rounded-2xl py-1.5 px-3 md:py-2 md:px-3.5 border transition-colors ${
                         msg.type === 'sticker' 
                           ? 'border-transparent bg-transparent py-0 px-0 shadow-none' 
@@ -1222,7 +1349,10 @@ export const ChatWindow: React.FC = () => {
                       )}
 
                       {msg.type === 'image' && (
-                        <div className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs border border-slate-900/60 bg-black/55">
+                        <div 
+                          className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs border border-slate-900/60 bg-black/55 cursor-pointer hover:opacity-95 transition"
+                          onClick={() => setSelectedImage(msg.fileUrl || null)}
+                        >
                           <img src={msg.fileUrl} alt="Visual content upload" className="w-full h-auto object-cover max-h-[220px]" />
                         </div>
                       )}
@@ -1375,6 +1505,10 @@ export const ChatWindow: React.FC = () => {
                         setInputText(`[Forwarded from ${msg.senderName}]:\n${msg.text}`); 
                         setActiveMessageMenuId(null);
                       }} title="Forward" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Forward className="w-3.5 h-3.5" /></button>
+                      <button type="button" onClick={() => { 
+                        saveMessageToFavorites(msg);
+                        setActiveMessageMenuId(null);
+                      }} title="Save to Favorites" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Bookmark className="w-3.5 h-3.5" /></button>
                       
                       {/* Emoji fast reply overlays */}
                       {['❤️', '🔥', '👍', '😂'].map((emoji) => (
@@ -1392,7 +1526,7 @@ export const ChatWindow: React.FC = () => {
                       ))}
                     </div>
                   </div>
-                </div>
+                </motion.div>
               );
             });
 
@@ -1415,6 +1549,33 @@ export const ChatWindow: React.FC = () => {
           </div>
         ))}
       </div>
+
+      <AnimatePresence>
+        {!isAtBottom && paginatedMessages.length > 5 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.8 }}
+            className="absolute bottom-20 right-4 md:right-8 z-[60]"
+          >
+            <button
+              onClick={() => scrollToBottom(true)}
+              className="bg-slate-800/80 hover:bg-slate-700/90 text-cyan-400 border border-slate-700 p-2.5 rounded-full shadow-xl shadow-black/50 backdrop-blur-md cursor-pointer transition-all active:scale-95"
+              title="Jump to bottom"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+              {initialUnreadId && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                </span>
+              )}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating live circular camera preview for video note capturing */}
       <AnimatePresence>
@@ -1753,7 +1914,7 @@ export const ChatWindow: React.FC = () => {
                     {language === 'ru' ? 'Черновик' : 'Draft'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <AudioWavePlayer src={URL.createObjectURL(voicePreviewBlob)} duration={voicePreviewDuration} />
+                    <AudioWavePlayer src={voicePreviewUrl || ''} duration={voicePreviewDuration} />
                   </div>
                 </div>
                 
@@ -1779,7 +1940,7 @@ export const ChatWindow: React.FC = () => {
                 </div>
               </div>
             ) : isRecording ? (
-              <div className="absolute inset-x-0 bottom-0 md:relative md:inset-auto flex flex-col md:flex-row items-stretch md:items-center justify-between bg-[#0B0B0D]/95 md:bg-black/45 border-t border-white/5 md:border border-white/5 p-3.5 md:p-2 rounded-t-2xl md:rounded-full text-xs text-slate-100 font-semibold shadow-2xl transition-all backdrop-blur-xl z-[45] gap-3 pb-[calc(env(safe-area-inset-bottom)+12px)] md:pb-2 animate-fade-in-up flex-1">
+              <div className="flex flex-1 items-center justify-between bg-[#0B0B0D]/95 md:bg-black/45 md:border border-white/5 px-2 md:px-3 py-1.5 rounded-full text-xs text-slate-100 font-semibold shadow-inner select-none min-h-[46px] animate-fade-in-up md:p-2 backdrop-blur-md gap-3">
                 {/* 1. Header Row (especially on mobile) with indicators and status */}
                 <div className="flex items-center justify-between md:justify-start gap-3 px-1">
                   <div className="flex items-center gap-2">
@@ -1885,17 +2046,16 @@ export const ChatWindow: React.FC = () => {
                 </button>
 
                 {/* 2. Compact text input Area */}
-                <input 
-                  ref={inputRef}
-                  type="text" 
+                <TextareaAutosize 
+                  ref={inputRef as any}
                   value={inputText}
                   disabled={cooldownRemaining > 0}
+                  maxRows={5}
                   onChange={(e) => {
-                    setInputText(e.target.value);
-                    if (activeChat) {
-                      sendTypingStatus(activeChat.id);
-                    }
+                    handleInputChange(e.target.value);
+                    if (activeChat) sendTypingStatus(activeChat.id);
                   }}
+                  onKeyDown={handleKeyDown}
                   onPaste={(e) => {
                     if (e.clipboardData.files && e.clipboardData.files[0]) {
                       const file = e.clipboardData.files[0];
@@ -1910,7 +2070,7 @@ export const ChatWindow: React.FC = () => {
                         ? (language === 'ru' ? "Изменить..." : "Change text...") 
                         : (language === 'ru' ? "Cообщение..." : "Message...")
                   }
-                  className="flex-1 bg-transparent text-slate-100 text-xs md:text-sm focus:outline-none placeholder-slate-650 min-h-[22px] max-h-[100px] disabled:opacity-50"
+                  className="flex-1 bg-transparent text-slate-100 text-sm focus:outline-none placeholder-slate-650 min-h-[20px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-1 py-1"
                 />
 
                 {/* 3. Dropdown trigger action menu button and File Picker */}
@@ -2048,6 +2208,31 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
+      {/* Selected Image Fullscreen Modal Viewer */}
+      {selectedImage && (
+        <div 
+          className="fixed inset-0 bg-black/95 backdrop-blur z-[200] flex items-center justify-center p-2 sm:p-4 select-none cursor-zoom-out"
+          onClick={() => setSelectedImage(null)}
+        >
+          <button 
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}
+            className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition cursor-pointer z-10 border border-white/10"
+            title={language === 'ru' ? 'Закрыть' : 'Close'}
+          >
+            <X className="w-5 h-5" />
+          </button>
+          
+          <img 
+            src={selectedImage} 
+            alt="Fullscreen preview" 
+            className="max-w-full max-h-full object-contain cursor-default" 
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={() => setSelectedImage(null)} 
+          />
+        </div>
+      )}
+
       {/* Selected User Full Profile Modal Viewer */}
       {selectedUserProfile && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
@@ -2176,10 +2361,107 @@ export const ChatWindow: React.FC = () => {
                 )}
               </div>
             </div>
-
           </div>
         </div>
       )}
+
+      {/* Mobile Context Menu Bottom Sheet */}
+      <AnimatePresence>
+        {activeMenuMessage && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed flex md:hidden inset-0 bg-black/60 z-[150] touch-none"
+              onClick={() => setActiveMessageMenuId(null)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-[160] bg-slate-900 border-t border-slate-800 rounded-t-3xl p-4 flex md:hidden flex-col shadow-2xl pb-safe"
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.5 }}
+              onDragEnd={(e, info) => {
+                if (info.offset.y > 60) setActiveMessageMenuId(null);
+              }}
+            >
+              <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-4" />
+              
+              <div className="flex gap-4 justify-around mb-6 text-2xl bg-black/20 p-3 rounded-2xl border border-white/5">
+                {['❤️', '🔥', '👍', '😂', '😢', '😡'].map((emoji) => (
+                   <button 
+                     key={emoji}
+                     onClick={() => {
+                       addMessageReaction(activeMenuMessage.id, emoji);
+                       setActiveMessageMenuId(null);
+                     }}
+                     className="hover:scale-125 transition cursor-pointer active:scale-95"
+                   >
+                     {emoji}
+                   </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <button 
+                  onClick={() => { setReplyTarget(activeMenuMessage); setActiveMessageMenuId(null); }}
+                  className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                >
+                  <Reply className="w-5 h-5 text-cyan-400" />
+                  {language === 'ru' ? 'Ответить' : 'Reply'}
+                </button>
+
+                <button 
+                  onClick={() => { triggerCopyAction(activeMenuMessage.text); setActiveMessageMenuId(null); }}
+                  className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                >
+                  <Copy className="w-5 h-5 text-cyan-400" />
+                  {language === 'ru' ? 'Копировать' : 'Copy'}
+                </button>
+
+                {activeMenuMessage.senderId === currentUser?.uid && (
+                  <>
+                    <button 
+                      onClick={() => { setEditTarget(activeMenuMessage); setInputText(activeMenuMessage.text); setActiveMessageMenuId(null); }}
+                      className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                    >
+                      <Edit2 className="w-5 h-5 text-cyan-400" />
+                      {language === 'ru' ? 'Изменить' : 'Edit'}
+                    </button>
+                    <button 
+                      onClick={() => { deleteMessage(activeMenuMessage.id); setActiveMessageMenuId(null); }}
+                      className="flex items-center gap-3 w-full p-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      {language === 'ru' ? 'Удалить' : 'Delete'}
+                    </button>
+                  </>
+                )}
+                
+                <button 
+                  onClick={() => { saveMessageToFavorites(activeMenuMessage); setActiveMessageMenuId(null); }}
+                  className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                >
+                  <Bookmark className="w-5 h-5 text-cyan-400" />
+                  {language === 'ru' ? 'В избранное' : 'Save to Favorites'}
+                </button>
+
+                <button 
+                  onClick={() => { pinMessage(activeChat?.id || '', activeMenuMessage.id); setActiveMessageMenuId(null); }}
+                  className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                >
+                  <Pin className="w-5 h-5 text-cyan-400" />
+                  {language === 'ru' ? 'Закрепить' : 'Pin'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
