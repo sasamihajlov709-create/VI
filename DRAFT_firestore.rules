@@ -98,12 +98,6 @@ service cloud.firestore {
         && data.createdAt is int;
     }
     
-    // Check if user is being blocked by target
-    function isBlockedBy(targetUid, authUid) {
-      let targetDoc = getUser(targetUid);
-      return targetDoc.blockedUsers != null && targetDoc.blockedUsers.hasAny([authUid]);
-    }
-
     function isValidStory(data) {
       return data.keys().hasAll(['id', 'userId', 'mediaUrl', 'createdAt', 'expiresAt'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
@@ -148,6 +142,12 @@ service cloud.firestore {
         && data.action is string && data.action.size() <= 100
         && data.details is string && data.details.size() <= 5000
         && data.timestamp is int;
+    }
+
+    // Check if user is being blocked by target
+    function isBlockedBy(targetUid, authUid) {
+      let targetDoc = getUser(targetUid);
+      return targetDoc.blockedUsers != null && targetDoc.blockedUsers.hasAny([authUid]);
     }
 
     // --- CORES ---

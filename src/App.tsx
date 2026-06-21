@@ -11,6 +11,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatWindow } from './components/ChatWindow';
 import { ProfilePanel } from './components/ProfilePanel';
 import { CallScreen } from './components/CallScreen';
+import { Onboarding } from './components/Onboarding';
 import { 
   Lock, 
   Mail, 
@@ -122,6 +123,10 @@ const MessengerContent: React.FC = () => {
 
   // 2. Authenticated user panel views
   if (currentUser && userProfile) {
+    if (!userProfile.isOnboarded) {
+      return <Onboarding />;
+    }
+
     return (
       <div className={`flex h-[100dvh] w-screen text-slate-100 overflow-hidden relative font-sans ${theme}`}>
         {/* Offline connection status bar */}

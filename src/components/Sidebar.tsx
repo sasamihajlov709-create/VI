@@ -141,6 +141,32 @@ export const Sidebar: React.FC = () => {
     }
   }, [userProfile]);
 
+  // Keyboard navigation & productivity hotkeys for Desktop
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Search trigger: Ctrl+K or Cmd+K
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const input = document.getElementById('sidebar-search-input');
+        if (input) {
+          input.focus();
+        }
+      }
+      // 2. Escape triggers: Close modals & drop context menus
+      if (e.key === 'Escape') {
+        setShowSettings(false);
+        setShowCreateChat(false);
+        setShowFolderModal(false);
+        setSidebarCtxMenu(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const { updateMyProfile } = useMessenger();
 
   // Handle live user searching
@@ -447,6 +473,7 @@ export const Sidebar: React.FC = () => {
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
           <input 
+            id="sidebar-search-input"
             type="text" 
             placeholder={t.searchPlaceholder}
             value={searchQuery}
@@ -603,10 +630,97 @@ export const Sidebar: React.FC = () => {
         )}
 
         {filteredChats.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500 h-2/3">
-            <MessageSquare className="w-10 h-10 mb-2 opacity-30" />
-            <p className="text-sm font-medium">{t.noActiveChats}</p>
-            <p className="text-xs text-slate-605 mt-1">{t.noActiveChatsSub}</p>
+          <div className="flex flex-col items-center justify-start p-6 text-center text-slate-500 overflow-y-auto h-full scrollbar-hidden">
+            <div className="py-4">
+              <div className="w-12 h-12 bg-[#C4B4E6]/10 rounded-2xl flex items-center justify-center border border-white/5 mx-auto mb-2.5">
+                <MessageSquare className="w-6 h-6 text-cyan-400" />
+              </div>
+              <p className="text-sm font-bold text-slate-200">{t.noActiveChats}</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">{t.noActiveChatsSub}</p>
+            </div>
+
+            <div className="w-full space-y-2.5 pt-2">
+              <button 
+                onClick={() => {
+                  setChatTypeSelection('group');
+                  setShowCreateChat(true);
+                }}
+                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
+              >
+                <div className="w-9 h-9 bg-cyan-500/10 rounded-xl flex items-center justify-center shrink-0 border border-cyan-500/10 group-hover:scale-105 transition-transform">
+                  <Plus className="w-4 h-4 text-cyan-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-200 group-hover:text-cyan-400 transition-colors">
+                    {language === 'ru' ? 'Новый Чат / Пин-код' : 'Initiate New Transfer'}
+                  </p>
+                  <p className="text-[10px] text-slate-450 mt-0.5">
+                    {language === 'ru' ? 'Начать личный чат, группу или канал' : 'Direct dialogs, secure workspaces'}
+                  </p>
+                </div>
+              </button>
+
+              <button 
+                onClick={async () => {
+                  if (userProfile) {
+                    await createDirectChat(userProfile);
+                  }
+                }}
+                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
+              >
+                <div className="w-9 h-9 bg-amber-500/10 rounded-xl flex items-center justify-center shrink-0 border border-amber-500/10 group-hover:scale-105 transition-transform">
+                  <Bookmark className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-200 group-hover:text-amber-400 transition-colors">
+                    {language === 'ru' ? 'Избранное / Сейв' : 'Saved Messages / cloud'}
+                  </p>
+                  <p className="text-[10px] text-slate-450 mt-0.5">
+                    {language === 'ru' ? 'Личное облачное хранилище данных' : 'Your personal secure file cloud'}
+                  </p>
+                </div>
+              </button>
+
+              <button 
+                onClick={() => {
+                  const el = document.getElementById('sidebar-search-input');
+                  if (el) el.focus();
+                }}
+                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
+              >
+                <div className="w-9 h-9 bg-indigo-500/10 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/10 group-hover:scale-105 transition-transform">
+                  <Search className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-200 group-hover:text-indigo-400 transition-colors">
+                    {language === 'ru' ? 'Поиск Пользователей' : 'Discover Global Channels'}
+                  </p>
+                  <p className="text-[10px] text-slate-450 mt-0.5">
+                    {language === 'ru' ? 'Найти людей или каналы по никнейму' : 'Query unique usernames or tag catalogs'}
+                  </p>
+                </div>
+              </button>
+
+              <button 
+                onClick={() => {
+                  setShowSettings(true);
+                  setSettingsTab('account');
+                }}
+                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
+              >
+                <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center shrink-0 border border-emerald-500/10 group-hover:scale-105 transition-transform">
+                  <Settings className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-200 group-hover:text-emerald-400 transition-colors">
+                    {language === 'ru' ? 'Настроить Профиль' : 'Refine Global Settings'}
+                  </p>
+                  <p className="text-[10px] text-slate-450 mt-0.5">
+                    {language === 'ru' ? 'Задать описание, статус или приватность' : 'Alter handle identities, block hosts'}
+                  </p>
+                </div>
+              </button>
+            </div>
           </div>
         ) : (
           <div style={{ height: totalHeight, width: '100%', position: 'relative' }}>

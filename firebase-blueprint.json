@@ -133,6 +133,37 @@
         "createdAt": { "type": "number", "description": "Creation time indicator" }
       },
       "required": ["id", "userId", "chatId", "status", "createdAt"]
+    },
+    "ReportItem": {
+      "title": "ReportItem",
+      "description": "User reports for moderation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique report ID" },
+        "reporterId": { "type": "string", "description": "User UID who reported" },
+        "reportedUserId": { "type": "string", "description": "User UID who is being reported" },
+        "chatId": { "type": "string", "description": "Underlying chat ID context" },
+        "messageId": { "type": "string", "description": "Underlying message ID context" },
+        "reason": { "type": "string", "description": "Abuse category or custom text reason" },
+        "createdAt": { "type": "number", "description": "Creation timestamp epoch" }
+      },
+      "required": ["id", "reporterId", "reportedUserId", "reason", "createdAt"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Security audit logs for safety traceability",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique log ID" },
+        "actorId": { "type": "string", "description": "UID of actor performing action" },
+        "actorName": { "type": "string", "description": "Display name of actor performing action" },
+        "action": { "type": "string", "description": "Strict action category label" },
+        "details": { "type": "string", "description": "Human-readable descriptive payload" },
+        "chatId": { "type": "string", "description": "Chat ID context" },
+        "targetId": { "type": "string", "description": "Target ID or user UID affected" },
+        "timestamp": { "type": "number", "description": "Epoch timestamp of log creation" }
+      },
+      "required": ["id", "actorId", "actorName", "action", "details", "timestamp"]
     }
   },
   "firestore": {
@@ -163,6 +194,14 @@
     "joinRequests/{requestId}": {
       "schema": "JoinRequest",
       "description": "Private chats access request line queue"
+    },
+    "reports/{reportId}": {
+      "schema": "ReportItem",
+      "description": "Abuse other user logs for mod verification"
+    },
+    "auditLogs/{logId}": {
+      "schema": "AuditLogEntry",
+      "description": "Immutable security tracking system audit trails"
     }
   }
 }

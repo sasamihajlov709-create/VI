@@ -32,7 +32,8 @@ import {
   arrayRemove, 
   increment,
   runTransaction,
-  writeBatch
+  writeBatch,
+  deleteDoc
 } from 'firebase/firestore';
 import { 
   ref as storageRef, 
@@ -87,6 +88,15 @@ interface MessengerContextType {
     phoneNumber?: string,
     privacySettings?: UserProfile['privacySettings']
   ) => Promise<void>;
+  completeOnboarding: (data: {
+    displayName: string;
+    username: string;
+    photoURL: string;
+    bio: string;
+    theme: string;
+    themeDensity: 'cozy' | 'compact' | 'comfortable';
+    privacySettings?: UserProfile['privacySettings'];
+  }) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   deleteAvatar: () => Promise<void>;
   updateFolder: (folderId: string, name: string, icon: string, chatIds: string[], rules?: ('direct' | 'group' | 'channel' | 'unread' | 'work' | 'friends')[]) => Promise<void>;
@@ -166,6 +176,12 @@ interface MessengerContextType {
   revokeInviteLink: (inviteId: string) => Promise<void>;
   submitJoinRequest: (chatId: string, reason?: string) => Promise<void>;
   handleJoinRequest: (requestId: string, action: 'approved' | 'rejected') => Promise<void>;
+  terminateOtherSessions: () => Promise<void>;
+  submitReport: (reportedUserId: string, chatId?: string, messageId?: string, reason: string) => Promise<void>;
+  resolveReport: (reportId: string) => Promise<void>;
+  writeAuditLog: (action: string, details: string, chatId?: string, targetId?: string) => Promise<void>;
+  globalReports: ReportItem[];
+  globalAuditLogs: any[];
 }
 
 const MessengerContext = createContext<MessengerContextType | undefined>(undefined);
@@ -190,6 +206,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [uploadProgress, setUploadProgress] = useState<{ [msgId: string]: number }>({});
   const [selectedUserProfile, setSelectedUserProfile] = useState<UserProfile | null>(null);
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('app-theme') || 'theme-dark-glass');
+  const [globalReports, setGlobalReports] = useState<ReportItem[]>([]);
+  const [globalAuditLogs, setGlobalAuditLogs] = useState<any[]>([]);
 
   const setTheme = async (t: string) => {
     setThemeState(t);
@@ -214,6 +232,36 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  // Admin and Moderation Real-Time Collections Sync
+  useEffect(() => {
+    if (!currentUser || currentUser.email !== 'sasamihajlov709@gmail.com') {
+      setGlobalReports([]);
+      setGlobalAuditLogs([]);
+      return;
+    }
+
+    const unsubReports = onSnapshot(collection(db, 'reports'), (snap) => {
+      const list: ReportItem[] = [];
+      snap.forEach(d => list.push(d.data() as ReportItem));
+      setGlobalReports(list.sort((a,b) => b.createdAt - a.createdAt));
+    }, (err) => {
+      console.log('Failing reports sub (rules enforced):', err);
+    });
+
+    const unsubLogs = onSnapshot(collection(db, 'auditLogs'), (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push(d.data()));
+      setGlobalAuditLogs(list.sort((a,b) => b.timestamp - a.timestamp));
+    }, (err) => {
+      console.log('Failing logs sub (rules enforced):', err);
+    });
+
+    return () => {
+      unsubReports();
+      unsubLogs();
+    };
+  }, [currentUser]);
 
   // Auth & Session Restore
   useEffect(() => {
@@ -279,6 +327,22 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         
         setUserProfile(profileDetails);
         setBlockedUsersList(profileDetails.blockedUsers || []);
+
+        try {
+          const cleanDevName = navigator.userAgent.substring(0, 50);
+          const logId = doc(collection(db, 'auditLogs')).id;
+          const logEntry = {
+            id: logId,
+            actorId: user.uid,
+            actorName: profileDetails.displayName || 'Authorized User',
+            action: 'login',
+            details: `User successfully authenticated (Device: ${cleanDevName})`,
+            chatId: '',
+            targetId: '',
+            timestamp: Date.now()
+          };
+          setDoc(doc(db, 'auditLogs', logId), logEntry).catch(() => {});
+        } catch (_) {}
         
         // Listen to currentUser's profile changes dynamically
         const unsubProfile = onSnapshot(userRef, (docSnap) => {
@@ -674,6 +738,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (currentUser) {
       // Gracefully signal offline presence before logging out
       try {
+        await writeAuditLog('logout', 'User logged out voluntarily');
         await updateDoc(doc(db, 'users', currentUser.uid), {
           onlineStatus: 'offline',
           lastSeen: Date.now()
@@ -733,6 +798,56 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     
     await updateDoc(doc(db, 'users', currentUser.uid), updates);
     await updateProfile(currentUser, { displayName: displayName.trim() });
+
+    // Write profile and privacy changes audits
+    const changedFields = newHistory.map(h => h.field);
+    if (privacySettings) changedFields.push('privacySettings');
+    if (changedFields.length > 0) {
+      await writeAuditLog('profile_change', `User modified their public identity attributes: [${changedFields.join(', ')}]`);
+    }
+  };
+
+  const completeOnboarding = async (data: {
+    displayName: string;
+    username: string;
+    photoURL: string;
+    bio: string;
+    theme: string;
+    themeDensity: 'cozy' | 'compact' | 'comfortable';
+    privacySettings?: UserProfile['privacySettings'];
+  }) => {
+    if (!currentUser) return;
+    
+    const userLanguage = localStorage.getItem('vi_messenger_lang') || 'en';
+    
+    // Check username uniqueness
+    const q = query(collection(db, 'users'), where('username', '==', data.username.toLowerCase().trim()));
+    const snap = await getDocs(q);
+    const takenByOther = snap.docs.some(doc => doc.id !== currentUser.uid);
+    if (takenByOther) {
+      throw new Error(userLanguage === 'ru' ? 'Этот никнейм уже занят.' : 'This username is already taken. Please choose another.');
+    }
+
+    const updates: any = {
+      displayName: data.displayName.trim(),
+      username: data.username.toLowerCase().trim(),
+      photoURL: data.photoURL,
+      bio: data.bio.trim(),
+      theme: data.theme,
+      themeDensity: data.themeDensity,
+      isOnboarded: true,
+      lastSeen: Date.now()
+    };
+
+    if (data.privacySettings) {
+      updates.privacySettings = data.privacySettings;
+    }
+
+    await updateDoc(doc(db, 'users', currentUser.uid), updates);
+    await updateProfile(currentUser, { 
+      displayName: data.displayName.trim(),
+      photoURL: data.photoURL
+    });
   };
 
   const uploadAvatar = async (file: File) => {
@@ -796,6 +911,31 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const writeAuditLog = async (
+    action: string,
+    details: string,
+    chatId?: string,
+    targetId?: string
+  ) => {
+    if (!currentUser || !userProfile) return;
+    try {
+      const logId = doc(collection(db, 'auditLogs')).id;
+      const logEntry = {
+        id: logId,
+        actorId: currentUser.uid,
+        actorName: userProfile.displayName || 'Authorized User',
+        action,
+        details: details.substring(0, 5000), // Enforce size constraint
+        chatId: chatId || '',
+        targetId: targetId || '',
+        timestamp: Date.now()
+      };
+      await setDoc(doc(db, 'auditLogs', logId), logEntry);
+    } catch (err) {
+      console.log('Failed audit log write:', err);
+    }
+  };
+
   const terminateSession = async (sessionId: string) => {
     if (!currentUser || !userProfile) return;
     const currentSessions = userProfile.activeSessions || [];
@@ -803,6 +943,52 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await updateDoc(doc(db, 'users', currentUser.uid), {
       activeSessions: updated
     });
+    await writeAuditLog('session_terminate', `Terminated active device session: ${sessionId}`);
+  };
+
+  const terminateOtherSessions = async () => {
+    if (!currentUser || !userProfile) return;
+    try {
+      const currentSessions = userProfile.activeSessions || [];
+      const currentDeviceToken = navigator.userAgent.substring(0, 30);
+      const updated = currentSessions.filter(s => s.deviceName.includes(currentDeviceToken));
+      await updateDoc(doc(db, 'users', currentUser.uid), {
+        activeSessions: updated
+      });
+      await writeAuditLog('security_action', 'Terminated all other active device sessions');
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${currentUser.uid}`);
+    }
+  };
+
+  const submitReport = async (reportedUserId: string, chatId?: string, messageId?: string, reason: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    try {
+      const reportId = doc(collection(db, 'reports')).id;
+      const newReport = {
+        id: reportId,
+        reporterId: currentUser.uid,
+        reportedUserId,
+        chatId: chatId || '',
+        messageId: messageId || '',
+        reason: reason.substring(0, 2000), // Enforce size limit
+        createdAt: Date.now()
+      };
+      await setDoc(doc(db, 'reports', reportId), newReport);
+      await writeAuditLog('report_submit', `Abuse report submitted on user: ${reportedUserId}`, chatId);
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.WRITE, `reports/${reportId}`);
+    }
+  };
+
+  const resolveReport = async (reportId: string) => {
+    if (!currentUser) throw new Error('Not authenticated');
+    try {
+      await deleteDoc(doc(db, 'reports', reportId));
+      await writeAuditLog('report_resolved', `Resolved/Deleted abuse report ID: ${reportId}`);
+    } catch (e: any) {
+      handleFirestoreError(e, OperationType.WRITE, `reports/${reportId}`);
+    }
   };
 
   // Direct Chats & Chat Creation Procedures
@@ -1156,6 +1342,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         restrictedIds: arrayRemove(memberId)
       });
       await logAdminAction(chatId, 'promote', memberId, targetName);
+      await writeAuditLog('role_change', `Promoted user ${targetName} to administrator role`, chatId, memberId);
     } else if (role === 'moderator') {
       await updateDoc(chatRef, {
         admins: arrayRemove(memberId),
@@ -1163,6 +1350,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         restrictedIds: arrayRemove(memberId)
       });
       await logAdminAction(chatId, 'promote', memberId, `${targetName} (Moderator)`);
+      await writeAuditLog('role_change', `Promoted user ${targetName} to moderator role`, chatId, memberId);
     } else if (role === 'restricted') {
       await updateDoc(chatRef, {
         admins: arrayRemove(memberId),
@@ -1170,6 +1358,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         restrictedIds: arrayUnion(memberId)
       });
       await logAdminAction(chatId, 'demote', memberId, `${targetName} (Restricted)`);
+      await writeAuditLog('role_change', `Applied restriction modifications on user ${targetName}`, chatId, memberId);
     } else {
       await updateDoc(chatRef, {
         admins: arrayRemove(memberId),
@@ -1177,6 +1366,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         restrictedIds: arrayRemove(memberId)
       });
       await logAdminAction(chatId, 'demote', memberId, targetName);
+      await writeAuditLog('role_change', `Demoted user ${targetName} to standard participant status`, chatId, memberId);
     }
   };
 
@@ -1190,6 +1380,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       restrictedIds: arrayRemove(memberId)
     });
     await logAdminAction(chatId, 'kick', memberId, targetName);
+    await writeAuditLog('moderation_kick', `Kicked participant ${targetName} from the conversation`, chatId, memberId);
   };
 
   const banMember = async (chatId: string, memberId: string, targetName: string) => {
@@ -1203,6 +1394,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       bannedIds: arrayUnion(memberId)
     });
     await logAdminAction(chatId, 'ban', memberId, targetName);
+    await writeAuditLog('moderation_ban', `Banned participant ${targetName} from entering the chat`, chatId, memberId);
   };
 
   const unbanMember = async (chatId: string, memberId: string, targetName: string) => {
@@ -1212,6 +1404,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       bannedIds: arrayRemove(memberId)
     });
     await logAdminAction(chatId, 'unban', memberId, targetName);
+    await writeAuditLog('moderation_unban', `Revoked chat access ban for user ${targetName}`, chatId, memberId);
   };
 
   const muteMember = async (chatId: string, memberId: string, targetName: string, durationMinutes?: number) => {
@@ -1225,11 +1418,13 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         [`mutedUntil.${memberId}`]: until
       });
       await logAdminAction(chatId, 'mute', memberId, `${targetName} for ${durationMinutes} mins`);
+      await writeAuditLog('moderation_mute', `Muted participant ${targetName} for ${durationMinutes} minutes`, chatId, memberId);
     } else {
       await updateDoc(chatRef, {
         mutedIds: arrayUnion(memberId)
       });
       await logAdminAction(chatId, 'mute', memberId, targetName);
+      await writeAuditLog('moderation_mute', `Muted participant ${targetName} indefinitely`, chatId, memberId);
     }
   };
 
@@ -1241,6 +1436,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       [`mutedUntil.${memberId}`]: 0
     });
     await logAdminAction(chatId, 'unmute', memberId, targetName);
+    await writeAuditLog('moderation_unmute', `Restored voice capabilities for user ${targetName}`, chatId, memberId);
   };
 
   const generateInviteLink = async (chatId: string, usageLimit: number | null, expiresHours: number | null): Promise<CustomInviteLink> => {
@@ -1271,14 +1467,26 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       inviteLink: `https://vi-messenger.app/join/${inviteId}`
     });
 
+    await writeAuditLog('invite_create', `Created standard invite registration: ${inviteId} (Limit: ${usageLimit || 'infinite'})`, chatId);
+
     return linkObj;
   };
 
   const revokeInviteLink = async (inviteId: string) => {
     const inviteRef = doc(db, 'invites', inviteId);
+    let cid = '';
+    try {
+      const snap = await getDoc(inviteRef);
+      if (snap.exists()) {
+        cid = snap.data().chatId || '';
+      }
+    } catch (_) {}
+
     await updateDoc(inviteRef, {
       isRevoked: true
     });
+
+    await writeAuditLog('invite_revoke', `Revoked standard invite reference: ${inviteId}`, cid);
   };
 
   const submitJoinRequest = async (chatId: string, reason?: string) => {
@@ -1708,6 +1916,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       fileUrl: '',
       updatedAt: Date.now()
     });
+    await writeAuditLog('message_delete', `Soft deleted message ID: ${messageId}`);
   };
 
   const saveMessageToFavorites = async (originalMsg: Message) => {
@@ -2066,6 +2275,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       resetPassword,
       logout,
       updateMyProfile,
+      completeOnboarding,
       uploadAvatar,
       deleteAvatar,
       updateFolder,
@@ -2138,7 +2348,13 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       generateInviteLink,
       revokeInviteLink,
       submitJoinRequest,
-      handleJoinRequest
+      handleJoinRequest,
+      terminateOtherSessions,
+      submitReport,
+      resolveReport,
+      writeAuditLog,
+      globalReports,
+      globalAuditLogs
     }}>
       {children}
     </MessengerContext.Provider>

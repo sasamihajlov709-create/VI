@@ -1070,6 +1070,15 @@ export const ChatWindow: React.FC = () => {
               </button>
             </>
           )}
+
+          <button 
+            type="button"
+            onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+            className={`p-1.5 rounded-lg cursor-pointer transition-all ${isRightPanelOpen ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-slate-200'}`}
+            title={language === 'ru' ? 'Информация о чате' : 'Chat & User Metadata'}
+          >
+            <Info className="w-4 h-4" />
+          </button>
         </div>
       </div>
 

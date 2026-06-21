@@ -28,6 +28,8 @@ export interface UserProfile {
     lastSeen?: 'all' | 'contacts' | 'nobody';
     onlineStatus?: 'all' | 'contacts' | 'nobody';
   };
+  isOnboarded?: boolean;
+  themeDensity?: 'cozy' | 'compact' | 'comfortable';
   profileChangeHistory?: { field: string; oldValue: string; newValue: string; timestamp: number }[];
   activeSessions?: ActiveSession[];
 }
