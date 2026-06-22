@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -31,13 +31,17 @@ import {
   Folder,
   FolderOpen,
   Globe,
-  Bookmark
+  Bookmark,
+  User
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useVirtual } from '../hooks/useVirtual';
 import { Chat, UserProfile, Story } from '../types';
 import { logger } from '../lib/logger';
+import { SidebarContactsView } from './SidebarContactsView';
+import { SidebarProfileView } from './SidebarProfileView';
+import { SidebarSettingsView } from './SidebarSettingsView';
 
 export const Sidebar: React.FC = () => {
   const { 
@@ -128,7 +132,59 @@ export const Sidebar: React.FC = () => {
   const [wallpaperSelection, setWallpaperSelection] = useState<string>(() => localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => localStorage.getItem('vi-sound-notifications') !== 'false');
   const [vibeEnabled, setVibeEnabled] = useState<boolean>(() => localStorage.getItem('vi-vibe-notifications') !== 'false');
-  
+
+  // Tick timer to automatically expire showing typing states
+  const [sidebarTick, setSidebarTick] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSidebarTick(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Multi-view navigation and helper state variables
+  const [sidebarView, setSidebarView] = useState<'chats' | 'contacts' | 'settings' | 'profile'>('chats');
+  const [contactUsername, setContactUsername] = useState('');
+  const [contactStatusMsg, setContactStatusMsg] = useState<{ type: 'error' | 'success', msg: string } | null>(null);
+
+  // Integrated back gesture for Mobile matching UX requests
+  useEffect(() => {
+    if (showSettings || showCreateChat || showFolderModal || sidebarView !== 'chats' || activeChat) {
+      // Small delay prevents weird history jumping if called rapid-fire
+      const timer = setTimeout(() => {
+        window.history.pushState({ modalOpen: true }, '');
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [showSettings, showCreateChat, showFolderModal, sidebarView, activeChat]);
+
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      const g = window as any;
+      if (g.__VI_BACK_HANDLED === e.timeStamp) return;
+
+      // Stack unwinding priority
+      if (showSettings) {
+        setShowSettings(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (showCreateChat) {
+        setShowCreateChat(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (showFolderModal) {
+        setShowFolderModal(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (sidebarView !== 'chats') {
+        setSidebarView('chats');
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (activeChat) {
+        setActiveChat(null);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [showSettings, showCreateChat, showFolderModal, sidebarView, activeChat, setActiveChat]);
+
   // Keep states in sync when userProfile updates in real-time
   React.useEffect(() => {
     if (userProfile) {
@@ -359,9 +415,36 @@ export const Sidebar: React.FC = () => {
       if (folderObj && !folderObj.chatIds.includes(chat.id)) return false;
     }
 
-    // 2. Search query matches title
-    if (searchQuery.trim().length > 0 && !searchQuery.startsWith('@')) {
-      return chat.title.toLowerCase().includes(searchQuery.toLowerCase());
+    // 2. Search query matches title, display name, username of other user, member names, or last message content
+    if (searchQuery.trim().length > 0) {
+      const queryLower = searchQuery.toLowerCase().replace(/^@/, ''); // handle both typing @username or just username text
+      const matchesTitle = chat.title?.toLowerCase().includes(queryLower);
+      
+      let matchesUserLower = false;
+      if (chat.type === 'direct' && currentUser) {
+        const counterpartId = chat.members.find(m => m !== currentUser.uid) || currentUser.uid;
+        const counterpartProfile = globalUsers.find(u => u.uid === counterpartId);
+        if (counterpartProfile) {
+          const nameMatches = counterpartProfile.displayName?.toLowerCase().includes(queryLower);
+          const usernameMatches = counterpartProfile.username?.toLowerCase().includes(queryLower);
+          matchesUserLower = !(!nameMatches && !usernameMatches);
+        }
+      }
+
+      let matchesMemberName = false;
+      if (currentUser && chat.members && globalUsers) {
+        const matchingMembers = globalUsers.filter(u => 
+          chat.members.includes(u.uid) && 
+          (u.displayName?.toLowerCase().includes(queryLower) || u.username?.toLowerCase().includes(queryLower))
+        );
+        if (matchingMembers.length > 0) {
+          matchesMemberName = true;
+        }
+      }
+
+      const matchesLastMessage = chat.lastMessage?.text?.toLowerCase().includes(queryLower);
+      
+      return matchesTitle || matchesUserLower || matchesMemberName || matchesLastMessage;
     }
 
     return true;
@@ -400,9 +483,8 @@ export const Sidebar: React.FC = () => {
 
   const getChatTypingIndicator = (chat: Chat) => {
     if (!chat.typing) return null;
-    const now = Date.now();
     const typingList = Object.entries(chat.typing)
-      .filter(([uid, timestamp]) => uid !== currentUser?.uid && now - (timestamp as number) < 5000)
+      .filter(([uid, timestamp]) => uid !== currentUser?.uid && sidebarTick - (timestamp as number) < 5000)
       .map(([uid]) => {
         const u = globalUsers.find((p) => p.uid === uid);
         return u ? u.displayName : (language === 'ru' ? 'Кто-то' : 'Someone');
@@ -412,80 +494,96 @@ export const Sidebar: React.FC = () => {
   };
 
   return (
-    <div className={`w-full md:w-[350px] border-r border-white/5 flex flex-col h-full shrink-0 relative glass-panel ${activeChat ? 'hidden md:flex' : 'flex'}`} style={{ background: 'var(--glass-sidebar-bg)' }}>
-      {/* Dynamic Header */}
-      <div className="p-4 flex flex-col gap-3 border-b border-white/5" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center font-bold text-slate-900 shadow-lg shadow-cyan-500/20 glass-highlight">
-              VI
+    <div className={`w-full md:w-[350px] border-r border-[#1B1B1E] flex flex-col h-full shrink-0 relative overflow-hidden bg-[#0C1322] select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} style={{ background: 'var(--glass-sidebar-bg)' }}>
+      {sidebarView === 'chats' ? (
+        <>
+          {/* Dynamic Header */}
+          <div className="p-4 flex flex-col gap-3 border-b border-white/5" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-cyan-700/80 flex items-center justify-center font-bold text-cyan-200 border border-cyan-500/20 shadow-lg shadow-cyan-500/10">
+                  VI
+                </div>
+                <span className="font-semibold tracking-tight text-lg text-slate-100">{t.appName}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {/* Language Toggle */}
+                <button 
+                  className="p-1 px-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 font-mono font-bold text-[11px] transition-all cursor-pointer border border-[#222]"
+                  title={language === 'en' ? 'Переключить на русский' : 'Switch to English'}
+                  onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
+                >
+                  {language === 'en' ? 'RU' : 'EN'}
+                </button>
+
+                {/* Saved Messages */}
+                <button 
+                  className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 transition-all cursor-pointer"
+                  title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
+                  onClick={async () => {
+                    if (userProfile) {
+                      await createDirectChat(userProfile);
+                    }
+                  }}
+                >
+                  <Bookmark className="w-5 h-5" />
+                </button>
+
+                {/* Create Chat */}
+                <button 
+                  className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+                  title={t.configureChat}
+                  onClick={() => {
+                    setChatTypeSelection('group');
+                    setShowCreateChat(true);
+                  }}
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <span className="font-semibold tracking-tight text-lg text-slate-100">{t.appName}</span>
+
+            {/* Global Prefix Search Bar */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
+              <input 
+                id="sidebar-search-input"
+                type="text" 
+                placeholder={t.searchPlaceholder}
+                value={searchQuery}
+                onChange={handleQueryChange}
+                className="w-full pl-9.5 pr-4 py-1.5 bg-black/15 hover:bg-black/25 text-xs rounded-full border border-white/5 focus:border-[var(--glass-border-focus)] focus:bg-black/30 focus:outline-none placeholder-slate-500 text-slate-100 transition-all shadow-inner font-sans"
+              />
+            </div>
+
+            {/* Segmented Chats vs. Channels control */}
+            <div className="pt-1">
+              <div className="grid grid-cols-2 p-0.5 bg-black/20 rounded-xl border border-white/5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setActiveFolder('all')}
+                  className={`py-1.5 rounded-lg font-semibold cursor-pointer transition-all ${
+                    activeFolder !== 'channels' 
+                      ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] border border-[var(--glass-accent)]/15 shadow' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {language === 'ru' ? 'Чаты' : 'Chats'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveFolder('channels')}
+                  className={`py-1.5 rounded-lg font-semibold cursor-pointer transition-all ${
+                    activeFolder === 'channels' 
+                      ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] border border-[var(--glass-accent)]/15 shadow' 
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {language === 'ru' ? 'Каналы' : 'Channels'}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            {/* Elegant Language toggle in header */}
-            <button 
-              className="p-1 px-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 font-mono font-bold text-[11px] transition-all cursor-pointer border border-[#222]"
-              title={language === 'en' ? 'Переключить на русский' : 'Switch to English'}
-              onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
-            >
-              {language === 'en' ? 'RU' : 'EN'}
-            </button>
-
-            <button 
-              className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 transition-all cursor-pointer"
-              title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
-              onClick={async () => {
-                if (userProfile) {
-                  await createDirectChat(userProfile);
-                }
-              }}
-            >
-              <Bookmark className="w-5 h-5" />
-            </button>
-
-            <button 
-              className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
-              title={t.configureChat}
-              onClick={() => setShowCreateChat(true)}
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-            <button 
-              className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
-              title={t.profileSettings}
-              onClick={() => {
-                setEditDisplayName(userProfile?.displayName || '');
-                setEditBio(userProfile?.bio || '');
-                setEditStatus(userProfile?.statusMessage || '');
-                setShowSettings(true);
-              }}
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-            <button 
-              className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-red-400 transition-all cursor-pointer"
-              title={t.logout}
-              onClick={logout}
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Global Chat / Context Prefix Search Bar */}
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
-          <input 
-            id="sidebar-search-input"
-            type="text" 
-            placeholder={t.searchPlaceholder}
-            value={searchQuery}
-            onChange={handleQueryChange}
-            className="w-full pl-9.5 pr-4 py-1.5 bg-black/15 hover:bg-black/25 text-xs rounded-full border border-white/5 focus:border-[var(--glass-border-focus)] focus:bg-black/30 focus:outline-none placeholder-slate-500 text-slate-100 transition-all shadow-inner"
-          />
-        </div>
-      </div>
 
       {/* Prefix live search results dropdown */}
       {searchResults.length > 0 && (
@@ -752,29 +850,84 @@ export const Sidebar: React.FC = () => {
                 >
                   {/* Swipe Background Reveal Layer */}
                   <div className="absolute inset-0 flex justify-between items-center px-6 pointer-events-none bg-slate-800/20">
-                     <div className="flex items-center text-cyan-500 gap-2">
-                        <MessageSquare className="w-5 h-5 opacity-80" />
+                     <div id={`chat-icon-right-${chat.id}`} className="flex items-center text-emerald-500 gap-2 opacity-0 transition-none">
+                        <Pin className="w-5 h-5 opacity-80" />
                      </div>
-                     <div className="flex items-center text-amber-500 gap-2">
+                     <div id={`chat-icon-left-${chat.id}`} className="flex items-center text-amber-500 gap-2 opacity-0 transition-none">
                         <Archive className="w-5 h-5 opacity-80" />
                      </div>
                   </div>
 
-                  <motion.div
+                   <motion.div
                     drag="x"
                     dragDirectionLock
                     dragConstraints={{ left: 0, right: 0 }}
                     dragElastic={{ left: 0.2, right: 0.2 }}
+                    onDrag={(e, info) => {
+                      const leftIcon = document.getElementById(`chat-icon-left-${chat.id}`);
+                      const rightIcon = document.getElementById(`chat-icon-right-${chat.id}`);
+                      const swipeDist = info.offset.x;
+                      if (swipeDist < 0 && leftIcon) {
+                        const progress = Math.min(Math.abs(swipeDist) / 60, 1);
+                        leftIcon.style.opacity = progress.toString();
+                        leftIcon.style.transform = `scale(${0.5 + progress * 0.5})`;
+                        if (rightIcon) rightIcon.style.opacity = '0';
+                        if (progress === 1 && leftIcon.dataset.vibrated !== 'true') {
+                          if ('vibrate' in navigator) navigator.vibrate(10);
+                          leftIcon.dataset.vibrated = 'true';
+                        } else if (progress < 1) {
+                          leftIcon.dataset.vibrated = 'false';
+                        }
+                      } else if (swipeDist > 0 && rightIcon) {
+                        const progress = Math.min(Math.abs(swipeDist) / 60, 1);
+                        rightIcon.style.opacity = progress.toString();
+                        rightIcon.style.transform = `scale(${0.5 + progress * 0.5})`;
+                        if (leftIcon) leftIcon.style.opacity = '0';
+                        if (progress === 1 && rightIcon.dataset.vibrated !== 'true') {
+                          if ('vibrate' in navigator) navigator.vibrate(10);
+                          rightIcon.dataset.vibrated = 'true';
+                        } else if (progress < 1) {
+                          rightIcon.dataset.vibrated = 'false';
+                        }
+                      }
+                    }}
                     onDragEnd={(e, info) => {
+                      const leftIcon = document.getElementById(`chat-icon-left-${chat.id}`);
+                      const rightIcon = document.getElementById(`chat-icon-right-${chat.id}`);
+                      if (leftIcon) {
+                        leftIcon.style.opacity = '0';
+                        leftIcon.dataset.vibrated = 'false';
+                      }
+                      if (rightIcon) {
+                        rightIcon.style.opacity = '0';
+                        rightIcon.dataset.vibrated = 'false';
+                      }
                       if (info.offset.x < -60) {
                          toggleArchiveChat(chat.id);
-                         if ('vibrate' in navigator) navigator.vibrate(20);
                       } else if (info.offset.x > 60) {
-                         setActiveChat(chat);
-                         if ('vibrate' in navigator) navigator.vibrate(20);
+                         togglePinChat(chat.id);
                       }
                     }}
                     onClick={() => setActiveChat(chat)}
+                    onTouchStart={(e) => {
+                      const timer = setTimeout(() => {
+                        setSidebarCtxMenu(chat.id);
+                        if ('vibrate' in navigator) navigator.vibrate(15);
+                      }, 350);
+                      e.currentTarget.dataset.lph = timer.toString();
+                    }}
+                    onTouchEnd={(e) => {
+                      const timer = e.currentTarget.dataset.lph;
+                      if (timer) clearTimeout(parseInt(timer));
+                    }}
+                    onTouchMove={(e) => {
+                      const timer = e.currentTarget.dataset.lph;
+                      if (timer) clearTimeout(parseInt(timer));
+                    }}
+                    onTouchCancel={(e) => {
+                      const timer = e.currentTarget.dataset.lph;
+                      if (timer) clearTimeout(parseInt(timer));
+                    }}
                     onContextMenu={(e: React.MouseEvent) => {
                       e.preventDefault();
                       setSidebarCtxMenu(chat.id);
@@ -879,6 +1032,68 @@ export const Sidebar: React.FC = () => {
             })}
           </div>
         )}
+      </div>
+        </>
+      ) : sidebarView === 'contacts' ? (
+        <SidebarContactsView
+          contactsList={contactsList}
+          globalUsers={globalUsers}
+          onlineUsers={onlineUsers}
+          addContactByUsername={addContactByUsername}
+          createDirectChat={createDirectChat}
+          setSidebarView={setSidebarView}
+          language={language}
+        />
+      ) : sidebarView === 'settings' ? (
+        <SidebarSettingsView
+          userProfile={userProfile}
+          currentUser={currentUser}
+          globalReports={globalReports}
+          globalAuditLogs={globalAuditLogs}
+          resolveReport={resolveReport}
+          terminateOtherSessions={terminateOtherSessions}
+          updateMyProfile={updateMyProfile}
+          uploadAvatar={uploadAvatar}
+          deleteAvatar={deleteAvatar}
+          language={language}
+          theme={theme}
+          setTheme={setTheme}
+        />
+      ) : (
+        <SidebarProfileView
+          userProfile={userProfile}
+          uploadAvatar={uploadAvatar}
+          deleteAvatar={deleteAvatar}
+          updateMyProfile={updateMyProfile}
+          logout={logout}
+          language={language}
+        />
+      )}
+
+      {/* Bottom Navigation Dock */}
+      <div className="grid grid-cols-4 border-t border-white/5 bg-[#0a0a0d]/65 backdrop-blur-md text-slate-450 text-[10px] select-none shrink-0" style={{ height: '56px' }}>
+        {[
+          { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats', icon: MessageSquare },
+          { id: 'contacts', label: language === 'ru' ? 'Контакты' : 'Contacts', icon: Users },
+          { id: 'settings', label: language === 'ru' ? 'Настройки' : 'Settings', icon: Sliders },
+          { id: 'profile', label: language === 'ru' ? 'Профиль' : 'Profile', icon: User },
+        ].map((btn) => {
+          const Icon = btn.icon;
+          const isActive = sidebarView === btn.id;
+          return (
+            <button
+              key={btn.id}
+              onClick={() => {
+                setSidebarView(btn.id as any);
+                setSearchQuery('');
+              }}
+              className={`flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all ${isActive ? 'text-cyan-400 font-bold bg-white/[0.02]' : 'hover:text-slate-200 hover:bg-white/[0.01]'}`}
+            >
+              <Icon className={`w-4.5 h-4.5 ${isActive ? 'scale-110 text-cyan-400 stroke-[2.2px]' : 'scale-100 opacity-65'}`} />
+              <span className="text-[10px] tracking-tight">{btn.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Creation Modal */}
@@ -1228,7 +1443,7 @@ export const Sidebar: React.FC = () => {
       )}
 
       {/* Profile Settings Drawer view */}
-      {showSettings && (
+      {false && showSettings && (
         <div className="fixed inset-y-0 left-0 w-full sm:w-[350px] border-r border-white/5 shadow-2xl flex flex-col z-50 glass-panel" style={{ background: 'var(--glass-sidebar-bg)' }}>
           <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
             <span className="font-semibold text-slate-200">My Profile Settings</span>

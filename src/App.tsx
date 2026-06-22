@@ -53,6 +53,30 @@ const MessengerContent: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState('');
 
   const [isLocalStorageOffline, setIsLocalStorageOffline] = useState(!navigator.onLine);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleViewportResize = () => {
+      if (window.visualViewport) {
+        setViewportHeight(window.visualViewport.height);
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportResize);
+      window.visualViewport.addEventListener('scroll', handleViewportResize);
+      handleViewportResize();
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleViewportResize);
+        window.visualViewport.removeEventListener('scroll', handleViewportResize);
+      }
+    };
+  }, []);
 
   React.useEffect(() => {
     const handleOnline = () => setIsLocalStorageOffline(false);
@@ -128,7 +152,10 @@ const MessengerContent: React.FC = () => {
     }
 
     return (
-      <div className={`flex h-[100dvh] w-screen text-slate-100 overflow-hidden relative font-sans ${theme}`}>
+      <div 
+        className={`flex w-screen text-slate-100 overflow-hidden relative font-sans ${theme}`}
+        style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+      >
         {/* Offline connection status bar */}
         {isLocalStorageOffline && (
           <div className="absolute top-0 inset-x-0 bg-red-650/90 text-white py-1 px-4 text-center text-xs font-mono tracking-wider flex items-center justify-center gap-2 z-50 shadow">
@@ -160,7 +187,10 @@ const MessengerContent: React.FC = () => {
 
   // 3. Guest authentication wizard login / Onboarding layout
   return (
-    <div className={`min-h-[100dvh] w-screen flex items-center justify-center p-4 relative overflow-hidden font-sans select-none ${theme}`}>
+    <div 
+      className={`w-screen flex items-center justify-center p-4 relative overflow-hidden font-sans select-none ${theme}`}
+      style={{ minHeight: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+    >
       {/* Floating Language Swapper in login */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 glass-panel px-3 py-1.5 rounded-full shadow-lg">
         <Globe className="w-3.5 h-3.5 text-slate-400" />

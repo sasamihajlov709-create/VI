@@ -87,7 +87,9 @@ interface MessengerContextType {
     photoURL?: string, 
     emojiStatus?: string, 
     phoneNumber?: string,
-    privacySettings?: UserProfile['privacySettings']
+    privacySettings?: UserProfile['privacySettings'],
+    birthday?: string,
+    customSettings?: UserProfile['customSettings']
   ) => Promise<void>;
   completeOnboarding: (data: {
     displayName: string;
@@ -187,6 +189,40 @@ interface MessengerContextType {
 
 const MessengerContext = createContext<MessengerContextType | undefined>(undefined);
 
+const playWebAudioNotification = () => {
+  if (localStorage.getItem('vi-sound-notifications') === 'false') {
+    return;
+  }
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    
+    const playTone = (freq: number, start: number, duration: number, volume: number) => {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      
+      gainNode.gain.setValueAtTime(volume, ctx.currentTime + start);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    };
+
+    // Beautiful soft double chime (523.25Hz -> C5 for 0.12s, then 659.25Hz -> E5 for 0.18s starting 0.07s later)
+    playTone(523.25, 0, 0.12, 0.15);
+    playTone(659.25, 0.07, 0.18, 0.15);
+  } catch (err) {
+    console.warn("Failed to play Web Audio API sound notification:", err);
+  }
+};
+
 export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -266,118 +302,187 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auth & Session Restore
   useEffect(() => {
+    let unsubProfile: (() => void) | null = null;
+    let setOfflinePresence: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
+      logger.info(`onAuthStateChanged triggered. uid: ${user?.uid || 'none'}, email: ${user?.email || 'none'}`);
+      
       if (user) {
-        // Core Presence Heartbeat (Keep user active)
-        const userRef = doc(db, 'users', user.uid);
-        const snapped = await getDoc(userRef);
-        
-        let profileDetails: UserProfile;
-        if (!snapped.exists()) {
-          // Provision default user info on first login
-          const cleanUsername = user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '') + Math.floor(Math.random() * 900 + 100);
-          profileDetails = {
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          const snapped = await getDoc(userRef);
+          
+          let profileDetails: UserProfile;
+          if (!snapped.exists()) {
+            logger.info(`User db profile for ${user.uid} not found. Provisioning clean default user...`);
+            const cleanUsername = user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '') + Math.floor(Math.random() * 900 + 100);
+            profileDetails = {
+              uid: user.uid,
+              displayName: user.displayName || 'Anonymous User',
+              username: cleanUsername.toLowerCase(),
+              email: user.email || '',
+              photoURL: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName || 'VI')}`,
+              bio: 'Hello, I am using VI Messenger!',
+              statusMessage: 'Productive and connected',
+              onlineStatus: 'online',
+              lastSeen: Date.now(),
+              createdAt: Date.now(),
+              contacts: [],
+              blockedUsers: [],
+              folders: [],
+              isOnboarded: true
+            };
+            await setDoc(userRef, profileDetails);
+          } else {
+            profileDetails = snapped.data() as UserProfile;
+            logger.info(`Retrieved existing user profile from db for: ${user.uid}`);
+          }
+          
+          // SET authenticated user state and userProfile together to immediately unblock the UI
+          setCurrentUser(user);
+          setUserProfile(profileDetails);
+          setBlockedUsersList(profileDetails.blockedUsers || []);
+
+          // Sync user to Cloud SQL Postgres database
+          (async () => {
+            try {
+              const idToken = await user.getIdToken();
+              const syncRes = await fetch('/api/users/sync', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${idToken}`
+                }
+              });
+              const syncData = await syncRes.json();
+              logger.info(`Synced user ${user.uid} with Cloud SQL Postgres`, syncData);
+            } catch (err) {
+              logger.error(`Failed to sync user with Cloud SQL Postgres:`, err);
+            }
+          })();
+
+          // Safe, non-blocking execution of supplementary presence status & sessions log
+          (async () => {
+            try {
+              await updateDoc(userRef, {
+                onlineStatus: 'online',
+                lastSeen: Date.now()
+              });
+              
+              const currentSessions = profileDetails.activeSessions || [];
+              const isDeviceRegistered = currentSessions.some(s => s.deviceName.includes(navigator.userAgent.substring(0, 30)));
+              if (!isDeviceRegistered) {
+                const freshSession: ActiveSession = {
+                  id: Math.random().toString(36).substring(2, 9),
+                  deviceName: `${navigator.userAgent.split(')')[0].split('(')[1] || 'Web Session'} - Browser`,
+                  lastActive: Date.now()
+                };
+                await updateDoc(userRef, {
+                  activeSessions: [...currentSessions, freshSession]
+                });
+              } else {
+                const updated = currentSessions.map(s => {
+                  if (s.deviceName.includes(navigator.userAgent.substring(0, 30))) {
+                    return { ...s, lastActive: Date.now() };
+                  }
+                  return s;
+                });
+                await updateDoc(userRef, {
+                  activeSessions: updated
+                });
+              }
+
+              // Save audit log
+              const cleanDevName = navigator.userAgent.substring(0, 50);
+              const logId = doc(collection(db, 'auditLogs')).id;
+              const logEntry = {
+                id: logId,
+                actorId: user.uid,
+                actorName: profileDetails.displayName || 'Authorized User',
+                action: 'login',
+                details: `User successfully authenticated (Device: ${cleanDevName})`,
+                chatId: '',
+                targetId: '',
+                timestamp: Date.now()
+              };
+              await setDoc(doc(db, 'auditLogs', logId), logEntry);
+              logger.info(`Supplementary session and audit registration logged successfully for user: ${user.uid}`);
+            } catch (suppErr) {
+              logger.warn(`Non-blocking supplementary session updates failed:`, suppErr);
+            }
+          })();
+
+          // Cleanup previous listener
+          if (unsubProfile) {
+            unsubProfile();
+          }
+
+          // Dynamic listen for profile changes in real-time
+          unsubProfile = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const up = docSnap.data() as UserProfile;
+              setUserProfile(up);
+              setBlockedUsersList(up.blockedUsers || []);
+              if (up.theme && up.theme !== localStorage.getItem('app-theme')) {
+                setThemeState(up.theme);
+                localStorage.setItem('app-theme', up.theme);
+              }
+            }
+          }, (error) => {
+            logger.error(`Error in user profile subscription snapshot:`, error);
+            handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+          });
+
+          // Toggle online/offline state on window exit
+          if (setOfflinePresence) {
+            window.removeEventListener('beforeunload', setOfflinePresence);
+          }
+
+          setOfflinePresence = () => {
+            try {
+              updateDoc(doc(db, 'users', user.uid), {
+                onlineStatus: 'offline',
+                lastSeen: Date.now()
+              });
+            } catch (err) {
+              logger.warn(`Presence shutdown task exception:`, err);
+            }
+          };
+
+          window.addEventListener('beforeunload', setOfflinePresence);
+
+        } catch (authRestoreErr: any) {
+          logger.error(`Fatal crash in full profile restoration logic:`, authRestoreErr);
+          // Fallback user profile to avoid blocking main UI loop
+          setCurrentUser(user);
+          setUserProfile({
             uid: user.uid,
-            displayName: user.displayName || 'Anonymous User',
-            username: cleanUsername.toLowerCase(),
+            displayName: user.displayName || 'Authenticated User (Offline Fallback)',
+            username: user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '') || 'user',
             email: user.email || '',
-            photoURL: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName || 'VI')}`,
-            bio: 'Hello, I am using VI Messenger!',
-            statusMessage: 'Productive and connected',
+            photoURL: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=VI`,
+            bio: 'Offline fallback metadata profile',
+            statusMessage: 'Busy (Offline)',
             onlineStatus: 'online',
             lastSeen: Date.now(),
             createdAt: Date.now(),
             contacts: [],
             blockedUsers: [],
             folders: []
-          };
-          await setDoc(userRef, profileDetails);
-        } else {
-          profileDetails = snapped.data() as UserProfile;
-          // Refresh presence status to online
-          await updateDoc(userRef, {
-            onlineStatus: 'online',
-            lastSeen: Date.now()
           });
         }
-        
-        // Auto-register current device session
-        const currentSessions = profileDetails.activeSessions || [];
-        const isDeviceRegistered = currentSessions.some(s => s.deviceName.includes(navigator.userAgent.substring(0, 30)));
-        if (!isDeviceRegistered) {
-          const freshSession: ActiveSession = {
-            id: Math.random().toString(36).substring(2, 9),
-            deviceName: `${navigator.userAgent.split(')')[0].split('(')[1] || 'Web Session'} - Browser`,
-            lastActive: Date.now()
-          };
-          await updateDoc(userRef, {
-            activeSessions: [...currentSessions, freshSession]
-          });
-        } else {
-          const updated = currentSessions.map(s => {
-            if (s.deviceName.includes(navigator.userAgent.substring(0, 30))) {
-              return { ...s, lastActive: Date.now() };
-            }
-            return s;
-          });
-          await updateDoc(userRef, {
-            activeSessions: updated
-          });
-        }
-        
-        setUserProfile(profileDetails);
-        setBlockedUsersList(profileDetails.blockedUsers || []);
-
-        try {
-          const cleanDevName = navigator.userAgent.substring(0, 50);
-          const logId = doc(collection(db, 'auditLogs')).id;
-          const logEntry = {
-            id: logId,
-            actorId: user.uid,
-            actorName: profileDetails.displayName || 'Authorized User',
-            action: 'login',
-            details: `User successfully authenticated (Device: ${cleanDevName})`,
-            chatId: '',
-            targetId: '',
-            timestamp: Date.now()
-          };
-          setDoc(doc(db, 'auditLogs', logId), logEntry).catch(() => {});
-        } catch (_) {}
-        
-        // Listen to currentUser's profile changes dynamically
-        const unsubProfile = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const up = docSnap.data() as UserProfile;
-            setUserProfile(up);
-            setBlockedUsersList(up.blockedUsers || []);
-            // Bidirectional Real-time Theme synchronization
-            if (up.theme && up.theme !== localStorage.getItem('app-theme')) {
-              setThemeState(up.theme);
-              localStorage.setItem('app-theme', up.theme);
-            }
-          }
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-        });
-
-        // Online/Offline automatic presence hook on window exit
-        const setOfflinePresence = async () => {
-          if (user) {
-            await updateDoc(doc(db, 'users', user.uid), {
-              onlineStatus: 'offline',
-              lastSeen: Date.now()
-            });
-          }
-        };
-        
-        window.addEventListener('beforeunload', setOfflinePresence);
-        
-        return () => {
-          unsubProfile();
-          window.removeEventListener('beforeunload', setOfflinePresence);
-        };
       } else {
+        logger.info('No active Firebase session detected. Cleaning up local context references...');
+        if (unsubProfile) {
+          unsubProfile();
+          unsubProfile = null;
+        }
+        if (setOfflinePresence) {
+          window.removeEventListener('beforeunload', setOfflinePresence);
+          setOfflinePresence = null;
+        }
+        setCurrentUser(null);
         setUserProfile(null);
         setChats([]);
         setMessages([]);
@@ -389,7 +494,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubProfile) {
+        unsubProfile();
+      }
+      if (setOfflinePresence) {
+        window.removeEventListener('beforeunload', setOfflinePresence);
+      }
+    };
   }, []);
 
   // Sync users list to populate online/offline metrics plus contact cards
@@ -448,12 +561,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newUnreads = chat.unreadCounts?.[currentUser.uid] || 0;
           
           if (newUnreads > oldUnreads && chat.lastMessage?.senderId !== currentUser.uid && chat.id !== activeChatRef.current?.id) {
+            // Play sound with Web Audio if sound is enabled and chat not muted
+            const isMuted = chat.muteIds?.includes(currentUser.uid);
+            if (!isMuted) {
+              playWebAudioNotification();
+            }
+
             // New message arrived from someone else in background chat
             if ('Notification' in window && Notification.permission === 'granted') {
               try {
-                const tone = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3?filename=message-incoming-132044.mp3');
-                tone.play().catch(() => {});
-                
                 const notif = new Notification(chat.title || chat.lastMessage?.senderName || 'New Message', {
                   body: chat.lastMessage?.text || 'Sent an attachment',
                   icon: chat.photoURL || 'https://img.icons8.com/color/192/speech-bubble.png',
@@ -475,6 +591,17 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Sort chats by updatedAt descending
       chatsData.sort((a, b) => b.updatedAt - a.updatedAt);
       setChats(chatsData);
+
+      // Auto-mark received background messages as 'delivered' using Firestore updates
+      chatsData.forEach((chat) => {
+        if (chat.lastMessage?.id && chat.lastMessage?.senderId !== currentUser.uid && chat.lastMessage?.status === 'sent') {
+          // If the user has activeChat open for this chat, it will be marked as 'read' via messages subscription
+          if (activeChatRef.current?.id === chat.id) return;
+          
+          updateDoc(doc(db, 'messages', chat.lastMessage.id), { status: 'delivered' }).catch(() => {});
+          updateDoc(doc(db, 'chats', chat.id), { 'lastMessage.status': 'delivered' }).catch(() => {});
+        }
+      });
 
       // Refresh the currently active chat object to catch title edits, members, or lastMessage additions
       if (activeChatRef.current) {
@@ -583,6 +710,25 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
         msgs.push({ ...data, id: doc.id });
       });
+
+      // Detect new incoming message to trigger synthesized notification chime
+      let hasNewExternalMsg = false;
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const msg = change.doc.data() as Message;
+          const isRecent = Date.now() - msg.createdAt < 10000;
+          if (msg.senderId !== currentUser.uid && isRecent) {
+            hasNewExternalMsg = true;
+          }
+        }
+      });
+
+      if (hasNewExternalMsg) {
+        const isMuted = activeChat?.muteIds?.includes(currentUser.uid);
+        if (!isMuted) {
+          playWebAudioNotification();
+        }
+      }
       
       // Sort messages chronologically
       msgs.sort((a, b) => a.createdAt - b.createdAt);
@@ -594,14 +740,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const batch = writeBatch(db);
         unreadMsgs.forEach((msg) => {
           batch.update(doc(db, 'messages', msg.id), {
-            readBy: arrayUnion(currentUser.uid)
+            readBy: arrayUnion(currentUser.uid),
+            status: 'read'
           });
         });
         
         // Reset the read counter in Firestore transaction-safely
         if (activeChat) {
           batch.update(doc(db, 'chats', activeChat.id), {
-            [`unreadCounts.${currentUser.uid}`]: 0
+            [`unreadCounts.${currentUser.uid}`]: 0,
+            'lastMessage.status': 'read'
           });
         }
         
@@ -716,6 +864,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       bio: 'Hello! I am using VI Messenger.',
       statusMessage: 'Connected and busy',
       onlineStatus: 'online',
+      isOnboarded: true,
       lastSeen: Date.now(),
       createdAt: Date.now(),
       contacts: [],
@@ -758,7 +907,9 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     photoURL?: string, 
     emojiStatus?: string, 
     phoneNumber?: string,
-    privacySettings?: UserProfile['privacySettings']
+    privacySettings?: UserProfile['privacySettings'],
+    birthday?: string,
+    customSettings?: UserProfile['customSettings']
   ) => {
     if (!currentUser || !userProfile) return;
     
@@ -776,6 +927,9 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     recordChange('statusMessage', userProfile.statusMessage || '', statusMsg);
     recordChange('emojiStatus', userProfile.emojiStatus || '', emojiStatus || '');
     recordChange('phoneNumber', userProfile.phoneNumber || '', phoneNumber || '');
+    if (birthday !== undefined) {
+      recordChange('birthday', userProfile.birthday || '', birthday || '');
+    }
     
     const updates: any = {
       displayName: displayName.trim(),
@@ -786,6 +940,14 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       profileChangeHistory: newHistory,
       lastSeen: Date.now()
     };
+
+    if (birthday !== undefined) {
+      updates.birthday = birthday || '';
+    }
+
+    if (customSettings !== undefined) {
+      updates.customSettings = customSettings;
+    }
     
     if (photoURL) {
       recordChange('photoURL', userProfile.photoURL || '', photoURL);
@@ -1659,10 +1821,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         await updateDoc(doc(db, 'chats', activeChat.id), {
           lastMessage: {
+            id: messageId,
             text: text.trim(),
             senderId: currentUser.uid,
             senderName: userProfile.displayName,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            status: 'sent'
           },
           updatedAt: Date.now(),
           ...increments
@@ -1735,10 +1899,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         await updateDoc(doc(db, 'chats', activeChat.id), {
           lastMessage: {
+            id: messageId,
             text: `[${type.toUpperCase()}] ${file.name}`,
             senderId: currentUser.uid,
             senderName: userProfile.displayName,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            status: 'sent'
           },
           updatedAt: Date.now(),
           ...increments
@@ -1795,10 +1961,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     await updateDoc(doc(db, 'chats', activeChat.id), {
       lastMessage: {
+        id: messageId,
         text: '🎙️ Voice Message',
         senderId: currentUser.uid,
         senderName: userProfile.displayName,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        status: 'sent'
       },
       updatedAt: Date.now(),
       ...increments
@@ -1838,10 +2006,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       await updateDoc(doc(db, 'chats', activeChat.id), {
         lastMessage: {
+          id: messageId,
           text: '🎨 Sticker',
           senderId: currentUser.uid,
           senderName: userProfile.displayName,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          status: 'sent'
         },
         updatedAt: Date.now(),
         ...increments
@@ -2015,10 +2185,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       await updateDoc(doc(db, 'chats', activeChat.id), {
         lastMessage: {
+          id: messageId,
           text: `📊 ${question}`,
           senderId: currentUser.uid,
           senderName: userProfile.displayName,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          status: 'sent'
         },
         updatedAt: Date.now(),
         ...increments

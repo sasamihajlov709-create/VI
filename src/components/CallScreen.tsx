@@ -115,6 +115,24 @@ export const CallScreen: React.FC = () => {
           }
         };
 
+        const addedCandidates = new Set<string>();
+        const pendingCandidates: string[] = [];
+
+        const processPendingCandidates = async () => {
+          if (!pc.remoteDescription) return;
+          for (const candStr of pendingCandidates) {
+            if (addedCandidates.has(candStr)) continue;
+            try {
+              const candidateObj = JSON.parse(candStr);
+              await pc.addIceCandidate(new RTCIceCandidate(candidateObj));
+              addedCandidates.add(candStr);
+            } catch (err) {
+              logger.warn("Failed resolving pending candidate", err);
+            }
+          }
+          pendingCandidates.length = 0;
+        };
+
         // 6. Caller SDP offer generation & Exchange setup
         if (ongoingCall.callerId === currentUser?.uid) {
           // Listen to call acceptor status changes
@@ -135,15 +153,24 @@ export const CallScreen: React.FC = () => {
               if (data.signal_answer && !pc.remoteDescription) {
                 const answer = new RTCSessionDescription(JSON.parse(data.signal_answer));
                 await pc.setRemoteDescription(answer);
+                await processPendingCandidates();
               }
 
               // Consume and add remote ICE candidates
               if (data.receiverCandidates) {
                 data.receiverCandidates.forEach((candidateStr: string) => {
-                  try {
-                    const candidateObj = JSON.parse(candidateStr);
-                    pc.addIceCandidate(new RTCIceCandidate(candidateObj));
-                  } catch (err) {}
+                  if (addedCandidates.has(candidateStr)) return;
+                  if (pc.remoteDescription) {
+                    try {
+                      const candidateObj = JSON.parse(candidateStr);
+                      pc.addIceCandidate(new RTCIceCandidate(candidateObj));
+                      addedCandidates.add(candidateStr);
+                    } catch (err) {}
+                  } else {
+                    if (!pendingCandidates.includes(candidateStr)) {
+                      pendingCandidates.push(candidateStr);
+                    }
+                  }
                 });
               }
             }
@@ -162,6 +189,7 @@ export const CallScreen: React.FC = () => {
               if (data.status === 'connected' && data.signal_offer && !pc.remoteDescription) {
                 const offerDesc = new RTCSessionDescription(JSON.parse(data.signal_offer));
                 await pc.setRemoteDescription(offerDesc);
+                await processPendingCandidates();
 
                 // Build local SDP Answer
                 const answer = await pc.createAnswer();
@@ -174,10 +202,18 @@ export const CallScreen: React.FC = () => {
               // Consume and add remote caller ICE candidates
               if (data.callerCandidates) {
                 data.callerCandidates.forEach((candidateStr: string) => {
-                  try {
-                    const candidateObj = JSON.parse(candidateStr);
-                    pc.addIceCandidate(new RTCIceCandidate(candidateObj));
-                  } catch (err) {}
+                  if (addedCandidates.has(candidateStr)) return;
+                  if (pc.remoteDescription) {
+                    try {
+                      const candidateObj = JSON.parse(candidateStr);
+                      pc.addIceCandidate(new RTCIceCandidate(candidateObj));
+                      addedCandidates.add(candidateStr);
+                    } catch (err) {}
+                  } else {
+                    if (!pendingCandidates.includes(candidateStr)) {
+                      pendingCandidates.push(candidateStr);
+                    }
+                  }
                 });
               }
             }

@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { logger } from '../lib/logger';
 
-export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number) => Promise<void>) {
+export function useVoiceRecorder(
+  sendVoiceMessage: (blob: Blob, duration: number) => Promise<void>,
+  onToggleMode?: () => void
+) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordDuration, setRecordDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -42,27 +45,54 @@ export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number
     setRecordingAmplitudes([]);
     audioChunksRef.current = [];
     clearInterval(durationTimerRef.current);
+    setVoicePreviewBlob(null);
+    setVoicePreviewDuration(0);
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      try {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      } catch (e) {}
       streamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {}
+      }
+      mediaRecorderRef.current = null;
     }
   }, []);
 
+  const isCancelledRef = useRef(false);
+
   const handleRecordStart = async (clientX: number, clientY: number) => {
     try {
+      isCancelledRef.current = false;
+      mediaRecorderRef.current = null;
+      setRecordingState('holding');
+      setIsRecording(true);
+      setRecordGestures({ startX: clientX, startY: clientY, currentX: clientX, currentY: clientY });
+      recordingStartTimeRef.current = Date.now();
+      setVoicePreviewBlob(null);
+      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (isCancelledRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       streamRef.current = stream;
       
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       shouldSendOnStopRef.current = false;
-
-      setRecordingState('holding');
-      setRecordGestures({ startX: clientX, startY: clientY, currentX: clientX, currentY: clientY });
-      setIsRecording(true);
-      recordingStartTimeRef.current = Date.now();
-      setVoicePreviewBlob(null);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
@@ -75,7 +105,13 @@ export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number
         
         setIsRecording(false);
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Always stop stream tracks when recording is finished to avoid resource leak / privacy indicator stay active
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/mp4' });
         
         if (shouldSendOnStopRef.current) {
           try {
@@ -142,24 +178,55 @@ export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number
   }
 
   const stopRecording = useCallback(() => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') {
+      isCancelledRef.current = true;
+      resetRecordingState();
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      } catch (e) {}
+      streamRef.current = null;
     }
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
     }
   }, []);
 
   const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current.stop();
+    isCancelledRef.current = true;
+    if (mediaRecorderRef.current) {
+      try {
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.ondataavailable = null;
+        mediaRecorderRef.current.onerror = null;
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (e) {}
+      mediaRecorderRef.current = null;
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      try {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      } catch (e) {}
+      streamRef.current = null;
     }
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
     }
     resetRecordingState();
   }, [resetRecordingState]);
@@ -188,7 +255,8 @@ export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number
       const holdDuration = Date.now() - recordingStartTimeRef.current;
       
       if (holdDuration < 350) {
-        setRecordingState('locked');
+        cancelRecording();
+        if (onToggleMode) onToggleMode();
       } else if (distanceX > 80) {
         cancelRecording();
       } else if (distanceY > 60) {
@@ -198,7 +266,7 @@ export function useVoiceRecorder(sendVoiceMessage: (blob: Blob, duration: number
         stopRecording();
       }
     }
-  }, [recordingState, recordGestures, cancelRecording, stopRecording]);
+  }, [recordingState, recordGestures, cancelRecording, stopRecording, onToggleMode]);
 
   const sendPreviewVoiceMessage = async () => {
     if (!voicePreviewBlob) return;

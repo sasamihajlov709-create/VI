@@ -30,6 +30,41 @@ export interface UserProfile {
   };
   isOnboarded?: boolean;
   themeDensity?: 'cozy' | 'compact' | 'comfortable';
+  birthday?: string; // custom birthday date string (e.g. YYYY-MM-DD)
+  customSettings?: {
+    // Media & Sound
+    swipeMediaOnClick?: boolean;
+    edgeSwipeNavigate?: boolean;
+    raiseToListen?: boolean;
+    raiseToRecord?: boolean;
+    pauseMusicOnRecord?: boolean;
+    pauseMusicOnMediaPlay?: boolean;
+    microphoneId?: string;
+    
+    // Notifications Configuration
+    notifyPrivate?: boolean;
+    notifyGroups?: boolean;
+    notifyChannels?: boolean;
+    notifyStories?: boolean;
+    notifyReactions?: 'messages' | 'stories' | 'none';
+    notifyCalls?: boolean;
+    vibrationMode?: 'default' | 'short' | 'long' | 'disabled';
+    ringtoneSelection?: 'standard' | 'cyber' | 'cosmic' | 'playful' | 'none';
+    showUnreadCounts?: boolean;
+    includeMutedInCounts?: boolean;
+    countMessagesOrChats?: 'messages' | 'chats';
+    inAppSound?: boolean;
+    inAppVibe?: boolean;
+    inAppPreviewText?: boolean;
+    inAppChatSound?: boolean;
+    inAppPopupsEnabled?: boolean;
+    notifyContactJoinedMsg?: boolean;
+    notifyPinnedMsg?: boolean;
+    notifyOtherMsg?: boolean;
+    restartOnClose?: boolean;
+    keepAliveBackground?: boolean;
+    retryNotificationsRelay?: boolean;
+  };
   profileChangeHistory?: { field: string; oldValue: string; newValue: string; timestamp: number }[];
   activeSessions?: ActiveSession[];
 }
@@ -65,10 +100,12 @@ export interface Chat {
   muteIds?: string[]; // uids who muted
   unreadCounts?: { [userId: string]: number };
   lastMessage?: {
+    id?: string;
     text: string;
     senderId: string;
     senderName: string;
     timestamp: number;
+    status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   };
   rules?: string;
   welcomeMessage?: string;

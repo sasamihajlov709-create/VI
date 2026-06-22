@@ -99,6 +99,130 @@ const getFileIcon = (fileName: string) => {
   return '📁';
 };
 
+interface ScrapeResult {
+  title: string;
+  description: string;
+  image: string;
+  url: string;
+}
+
+const detectUrl = (text: string): string | null => {
+  if (!text) return null;
+  const urlRegex = /(https?:\/\/[^\s<>'"]+(?:\([^\s()<>']+\)|[^\s()<>'".,;?!:]))/i;
+  const match = text.match(urlRegex);
+  return match ? match[0] : null;
+};
+
+const LinkPreview: React.FC<{ text: string }> = ({ text }) => {
+  const [preview, setPreview] = useState<ScrapeResult | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [hasError, setHasError] = useState<boolean>(false);
+
+  const url = detectUrl(text);
+
+  useEffect(() => {
+    if (!url) {
+      setPreview(null);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+    setHasError(false);
+
+    fetch(`/api/metadata/scrape?url=${encodeURIComponent(url)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Scrape failed");
+        return res.json();
+      })
+      .then((data) => {
+        if (isMounted) {
+          if (data && (data.title || data.description || data.image)) {
+            setPreview(data);
+          } else {
+            setHasError(true);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Link preview scraping error:", err);
+        if (isMounted) {
+          setHasError(true);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [url]);
+
+  if (!url || hasError) return null;
+
+  if (loading) {
+    return (
+      <div className="mt-2 p-2.5 rounded-lg bg-black/30 border border-white/5 flex items-center gap-3 animate-pulse max-w-sm">
+        <div className="w-10 h-10 rounded-md bg-white/5 shrink-0" />
+        <div className="flex-1 space-y-1.5">
+          <div className="h-2.5 w-1/3 rounded bg-white/10" />
+          <div className="h-2 w-2/3 rounded bg-white/5" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!preview) return null;
+
+  let hostname = '';
+  try {
+    hostname = new URL(preview.url).hostname.replace('www.', '');
+  } catch (_) {
+    hostname = 'link';
+  }
+
+  return (
+    <a 
+      href={preview.url} 
+      target="_blank" 
+      rel="noopener noreferrer"
+      className="mt-2 block rounded-lg bg-black/40 hover:bg-black/60 border border-white/5 overflow-hidden transition-all duration-200 cursor-pointer group shadow-sm max-w-md"
+    >
+      <div className="flex flex-col xs:flex-row">
+        {preview.image && (
+          <div className="w-full xs:w-[100px] aspect-video xs:aspect-square shrink-0 relative overflow-hidden border-b xs:border-b-0 xs:border-r border-white/5 bg-black/30 flex items-center justify-center">
+            <img 
+              src={preview.image} 
+              alt={preview.title}
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        <div className="p-2.5 flex flex-col justify-center min-w-0 flex-1">
+          <span className="text-[9px] font-mono text-cyan-400 uppercase tracking-wider font-bold mb-0.5 block truncate">
+            {hostname}
+          </span>
+          <h4 className="text-xs font-semibold text-slate-200 leading-snug line-clamp-1 mb-0.5 group-hover:text-cyan-400 transition-colors">
+            {preview.title}
+          </h4>
+          {preview.description && (
+            <p className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed font-sans font-light">
+              {preview.description}
+            </p>
+          )}
+        </div>
+      </div>
+    </a>
+  );
+};
+
 // Helper components for inline players to preserve reactive focus and layout isolation
 const CircularVideoNote: React.FC<{ src: string }> = ({ src }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -387,6 +511,58 @@ export const ChatWindow: React.FC = () => {
   const [showInChatSearch, setShowInChatSearch] = useState(false);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showAttachmentDropdown, setShowAttachmentDropdown] = useState(false);
+
+  // Floating emoji reaction animations state
+  const [activeFloatingReactions, setActiveFloatingReactions] = useState<{
+    id: string;
+    emoji: string;
+    x: number;
+    y: number;
+  }[]>([]);
+  const prevReactionsRef = useRef<{ [msgId: string]: { [userId: string]: string } }>({});
+
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+
+    const newReactionsToTrigger: { msgId: string; emoji: string }[] = [];
+
+    messages.forEach((msg) => {
+      const prev = prevReactionsRef.current[msg.id] || {};
+      const curr = msg.reactions || {};
+
+      // Check if any user added a new reaction
+      Object.entries(curr).forEach(([uid, emoji]) => {
+        if (prev[uid] !== emoji) {
+          newReactionsToTrigger.push({ msgId: msg.id, emoji });
+        }
+      });
+
+      // Update ref store
+      prevReactionsRef.current[msg.id] = { ...curr };
+    });
+
+    if (newReactionsToTrigger.length > 0) {
+      newReactionsToTrigger.forEach(({ msgId, emoji }) => {
+        const el = document.getElementById(`msg-${msgId}`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const id = Math.random().toString(36).substring(2, 9);
+          // Calculate center of message bubble
+          const x = rect.left + rect.width / 2;
+          const y = rect.top;
+
+          setActiveFloatingReactions((prev) => [
+            ...prev,
+            { id, emoji, x: x || window.innerWidth / 2, y: y || window.innerHeight / 2 },
+          ]);
+
+          setTimeout(() => {
+            setActiveFloatingReactions((prev) => prev.filter((r) => r.id !== id));
+          }, 1500);
+        }
+      });
+    }
+  }, [messages]);
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
@@ -395,6 +571,46 @@ export const ChatWindow: React.FC = () => {
   const [pollOptionsInput, setPollOptionsInput] = useState('');
   const [pollIsMultiple, setPollIsMultiple] = useState(false);
   const [pollIsAnonymous, setPollIsAnonymous] = useState(true);
+
+  // Back gesture interceptor for full-screen modals inside chat
+  useEffect(() => {
+    if (selectedImage || selectedUserProfile || showPollCreator || activeMessageMenuId || showAttachmentDropdown || showStickerPicker) {
+      const timer = setTimeout(() => {
+        window.history.pushState({ internalModal: true }, '');
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedImage, selectedUserProfile, showPollCreator, activeMessageMenuId, showAttachmentDropdown, showStickerPicker]);
+
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      const g = window as any;
+      if (g.__VI_BACK_HANDLED === e.timeStamp) return;
+
+      // Unwind deepest first
+      if (selectedImage) {
+        setSelectedImage(null);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (selectedUserProfile) {
+        setSelectedUserProfile(null);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (showPollCreator) {
+        setShowPollCreator(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (activeMessageMenuId) {
+        setActiveMessageMenuId(null);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (showAttachmentDropdown) {
+        setShowAttachmentDropdown(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      } else if (showStickerPicker) {
+        setShowStickerPicker(false);
+        g.__VI_BACK_HANDLED = e.timeStamp;
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectedImage, selectedUserProfile, showPollCreator, activeMessageMenuId, showAttachmentDropdown, showStickerPicker]);
   
   const [isSilent, setIsSilent] = useState(false);
   const [scheduledTime, setScheduledTime] = useState<number | null>(null);
@@ -432,7 +648,9 @@ export const ChatWindow: React.FC = () => {
     resetRecordingState,
     setRecordingState,
     shouldSendOnStopRef
-  } = useVoiceRecorder(sendVoiceMessage);
+  } = useVoiceRecorder(sendVoiceMessage, () => {
+    setRecordingMode(prev => prev === 'voice' ? 'video' : 'voice');
+  });
 
   const handleEmojiInsert = (emoji: string) => {
     setInputText((prev) => prev + emoji);
@@ -453,12 +671,15 @@ export const ChatWindow: React.FC = () => {
 
   // Live Circular Camera Recording parameters
   const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [recordingMode, setRecordingMode] = useState<'voice' | 'video'>('voice');
+  const pressStartTimeRef = useRef<number>(0);
   const [recordVideoDuration, setRecordVideoDuration] = useState(0);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const videoTimerRef = useRef<any>(null);
+  const isVideoCancelledRef = useRef<boolean>(false);
 
   // File Upload Draft tracker
   const [selectedDraftFile, setSelectedDraftFile] = useState<File | null>(null);
@@ -544,17 +765,48 @@ export const ChatWindow: React.FC = () => {
     }
   }, [paginatedMessages.length]);
 
+  // Escape key handler for active overlays
+  useEffect(() => {
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedImage) {
+          setSelectedImage(null);
+        } else if (selectedUserProfile) {
+          setSelectedUserProfile(null);
+        } else if (showStickerPicker) {
+          setShowStickerPicker(false);
+        } else if (showAttachmentDropdown) {
+          setShowAttachmentDropdown(false);
+        } else if (showPollCreator) {
+          setShowPollCreator(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalEsc);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalEsc);
+    };
+  }, [selectedImage, selectedUserProfile, showStickerPicker, showAttachmentDropdown, showPollCreator]);
+
+  // Tick timer to automatically expire showing typing states
+  const [typingTick, setTypingTick] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTypingTick(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Who is typing parsing (throttle 5 seconds)
   const typingUsers = useMemo(() => {
     if (!activeChat || !activeChat.typing) return [];
-    const now = Date.now();
     return Object.entries(activeChat.typing)
-      .filter(([uid, val]) => uid !== currentUser?.uid && now - (val as number) < 5000)
+      .filter(([uid, val]) => uid !== currentUser?.uid && typingTick - (val as number) < 5000)
       .map(([uid]) => {
         const u = globalUsers.find((p) => p.uid === uid);
         return u ? u.displayName : (language === 'ru' ? 'Кто-то' : 'Someone');
       });
-  }, [activeChat, globalUsers, currentUser, language]);
+  }, [activeChat, globalUsers, currentUser, language, typingTick]);
 
   // Keep bottom-scrolled automatically on message list expansion/height change
   const scrollToBottom = useCallback((smooth = false) => {
@@ -632,16 +884,32 @@ export const ChatWindow: React.FC = () => {
   // Video Note Circular camera recording
   const startVideoRecording = async () => {
     try {
+      isVideoCancelledRef.current = false;
+      videoRecorderRef.current = null;
+      setIsRecordingVideo(true);
+      setRecordVideoDuration(0);
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: true, 
         video: { width: 320, height: 320, facingMode: 'user' } 
       });
+      if (isVideoCancelledRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       videoStreamRef.current = stream;
       if (videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream;
       }
       
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+      let options = {};
+      if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+        options = { mimeType: 'video/webm;codecs=vp9,opus' };
+      } else if (MediaRecorder.isTypeSupported('video/webm')) {
+        options = { mimeType: 'video/webm' };
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        options = { mimeType: 'video/mp4' };
+      }
+      const recorder = new MediaRecorder(stream, options);
       videoRecorderRef.current = recorder;
       videoChunksRef.current = [];
 
@@ -653,10 +921,10 @@ export const ChatWindow: React.FC = () => {
 
       recorder.onstop = async () => {
         try {
-          const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-          if (videoBlob.size > 1000) {
+          const videoBlob = new Blob(videoChunksRef.current, { type: recorder.mimeType || 'video/mp4' });
+          if (videoBlob.size > 100) {
             // Wrapped as file with specific name triggers circular player in message log rendering
-            const videoFile = new File([videoBlob], 'video-note.webm', { type: 'video/webm' });
+            const videoFile = new File([videoBlob], 'video-note.webm', { type: recorder.mimeType || 'video/mp4' });
             await sendFileMessage(videoFile, 'video');
           }
         } catch (err: any) {
@@ -668,8 +936,6 @@ export const ChatWindow: React.FC = () => {
       };
 
       recorder.start();
-      setIsRecordingVideo(true);
-      setRecordVideoDuration(0);
 
       videoTimerRef.current = setInterval(() => {
         setRecordVideoDuration(prev => {
@@ -681,12 +947,17 @@ export const ChatWindow: React.FC = () => {
         });
       }, 1000);
     } catch (err: any) {
+      setIsRecordingVideo(false);
       logger.error("Camera webcam capture initiation error:", { error: err.message, stack: err.stack });
       alert(language === 'ru' ? 'Ошибка запуска веб-камеры. Проверьте права доступа в браузере.' : 'Failed to launch circular video note capture. Verify permissions.');
     }
   };
 
   const stopVideoRecording = () => {
+    if (!videoRecorderRef.current) {
+      isVideoCancelledRef.current = true;
+      setIsRecordingVideo(false);
+    }
     if (videoRecorderRef.current && isRecordingVideo) {
       videoRecorderRef.current.stop();
       setIsRecordingVideo(false);
@@ -695,6 +966,7 @@ export const ChatWindow: React.FC = () => {
   };
 
   const cancelVideoRecording = () => {
+    isVideoCancelledRef.current = true;
     if (videoRecorderRef.current && isRecordingVideo) {
       videoRecorderRef.current.onstop = null;
       videoRecorderRef.current.stop();
@@ -1243,15 +1515,68 @@ export const ChatWindow: React.FC = () => {
                   key={msg.id}
                   id={`msg-${msg.id}`}
                   className={`flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutive ? 'mt-0.5' : 'mt-2'} relative`}
+                  initial={{ opacity: 0, y: 12, scale: 0.99 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ 
+                    type: "spring",
+                    stiffness: 380,
+                    damping: 30,
+                    mass: 0.8
+                  }}
+                  layout="position"
                   drag="x"
                   dragDirectionLock
                   dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={{ left: 0.15, right: 0 }}
-                  onDragEnd={(e, info) => {
-                    if (info.offset.x < -40) {
-                       setReplyTarget(msg);
-                       if ('vibrate' in navigator) navigator.vibrate(20);
+                  dragElastic={{ left: 0.15, right: 0.15 }}
+                  onDrag={(e, info) => {
+                    const iconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
+                    const icon = document.getElementById(iconId);
+                    if (icon) {
+                      const swipeDist = isMe ? info.offset.x : -info.offset.x;
+                      if (swipeDist < 0) {
+                        const progress = Math.min(Math.abs(swipeDist) / 40, 1);
+                        icon.style.opacity = progress.toString();
+                        icon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
+                        if (progress === 1 && icon.dataset.vibrated !== 'true') {
+                          if ('vibrate' in navigator) navigator.vibrate(10);
+                          icon.dataset.vibrated = 'true';
+                        } else if (progress < 1) {
+                          icon.dataset.vibrated = 'false';
+                        }
+                      }
                     }
+                  }}
+                  onDragEnd={(e, info) => {
+                    const iconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
+                    const icon = document.getElementById(iconId);
+                    if (icon) {
+                      icon.style.opacity = '0';
+                      icon.style.transform = 'translateY(-50%) scale(0.5)';
+                      icon.dataset.vibrated = 'false';
+                    }
+                    const swipeDist = isMe ? info.offset.x : -info.offset.x;
+                    if (swipeDist < -40) {
+                      setReplyTarget(msg);
+                    }
+                  }}
+                  onTouchStart={(e) => {
+                    const timer = setTimeout(() => {
+                      if ('vibrate' in navigator) navigator.vibrate(10);
+                      setActiveMessageMenuId(msg.id);
+                    }, 350);
+                    e.currentTarget.dataset.lph = timer.toString();
+                  }}
+                  onTouchMove={(e) => {
+                    const timer = e.currentTarget.dataset.lph;
+                    if (timer) clearTimeout(parseInt(timer));
+                  }}
+                  onTouchEnd={(e) => {
+                    const timer = e.currentTarget.dataset.lph;
+                    if (timer) clearTimeout(parseInt(timer));
+                  }}
+                  onTouchCancel={(e) => {
+                    const timer = e.currentTarget.dataset.lph;
+                    if (timer) clearTimeout(parseInt(timer));
                   }}
                   onContextMenu={(e: React.MouseEvent) => {
                      e.preventDefault();
@@ -1259,8 +1584,8 @@ export const ChatWindow: React.FC = () => {
                   }}
                 >
                   {/* Reply icon indicator that opacity-fades in when dragged */}
-                  <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 text-slate-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none" id={`reply-icon-${msg.id}`}>
-                     <Reply className="w-3.5 h-3.5" />
+                  <div className={`absolute ${isMe ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 text-slate-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none transition-none`} id={isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`}>
+                     <Reply className={`w-3.5 h-3.5 ${isMe ? 'scale-x-[-1]' : ''}`} />
                   </div>
                   {/* Left Avatar for other users (Hidden on consecutive piles) */}
                   {!isMe && (
@@ -1446,9 +1771,12 @@ export const ChatWindow: React.FC = () => {
 
                       {/* Central raw formatted message texts */}
                       {msg.type !== 'sticker' && msg.type !== 'poll' && (
-                        <p className="text-[13px] md:text-sm leading-relaxed whitespace-pre-wrap select-text break-words pr-2">
-                          {formatMarkdownText(msg.text)}
-                        </p>
+                        <>
+                          <p className="text-[13px] md:text-sm leading-relaxed whitespace-pre-wrap select-text break-words pr-2">
+                            {formatMarkdownText(msg.text)}
+                          </p>
+                          <LinkPreview text={msg.text} />
+                        </>
                       )}
 
                       {/* Small visual anchor footer of state, ticks and date */}
@@ -1480,6 +1808,8 @@ export const ChatWindow: React.FC = () => {
                               <div className="w-2.5 h-2.5 rounded-full border border-slate-500 border-t-transparent animate-spin ml-0.5" />
                             ) : isRead ? (
                               <CheckCheck className="w-3 h-3 text-cyan-400" />
+                            ) : msg.status === 'delivered' ? (
+                              <CheckCheck className="w-3 h-3 text-slate-500" />
                             ) : (
                               <Check className="w-3 h-3 text-slate-500" />
                             )}
@@ -1818,7 +2148,15 @@ export const ChatWindow: React.FC = () => {
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                className="absolute bottom-12 right-2 z-40 border border-white/5 rounded-2xl shadow-2xl p-2 min-w-[215px] space-y-1 text-slate-200 select-none animate-fade-in glass-panel backdrop-blur-lg"
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={{ top: 0, bottom: 0.4 }}
+                onDragEnd={(e, info) => {
+                  if (info.offset.y > 40) {
+                    setShowAttachmentDropdown(false);
+                  }
+                }}
+                className="absolute bottom-12 right-2 z-40 border border-white/5 rounded-2xl shadow-2xl p-2 min-w-[215px] space-y-1 text-slate-200 select-none glass-panel backdrop-blur-lg touch-pan-x"
                 style={{ background: 'var(--glass-modal-bg)' }}
               >
                 <div className="text-[9px] uppercase font-mono font-bold tracking-widest text-[var(--glass-accent)] px-2 pb-1.5 border-b border-white/[0.04]">
@@ -1901,21 +2239,43 @@ export const ChatWindow: React.FC = () => {
           </AnimatePresence>
 
           {/* Transparent full-screen holding overlay to detect swipes & gestures cleanly */}
-          {recordingState === 'holding' && (
+          {(recordingState === 'holding' || isRecordingVideo) && (
             <div 
               className="fixed inset-0 z-[9999] cursor-grabbing bg-black/10 backdrop-blur-[0.5px] select-none touch-none"
-              onMouseMove={(e) => handleRecordMove(e.clientX, e.clientY)}
+              onMouseMove={(e) => {
+                if (recordingState === 'holding') handleRecordMove(e.clientX, e.clientY);
+              }}
               onTouchMove={(e) => {
                 const touch = e.touches[0];
-                handleRecordMove(touch.clientX, touch.clientY);
+                if (recordingState === 'holding') handleRecordMove(touch.clientX, touch.clientY);
               }}
-              onMouseUp={handleRecordRelease}
-              onTouchEnd={handleRecordRelease}
+              onMouseUp={() => {
+                if (recordingState === 'holding') handleRecordRelease();
+                else if (isRecordingVideo) {
+                    const elapsed = Date.now() - pressStartTimeRef.current;
+                    if (elapsed < 350) {
+                        cancelVideoRecording();
+                        setRecordingMode('voice');
+                    }
+                    else stopVideoRecording();
+                }
+              }}
+              onTouchEnd={() => {
+                if (recordingState === 'holding') handleRecordRelease();
+                else if (isRecordingVideo) {
+                    const elapsed = Date.now() - pressStartTimeRef.current;
+                    if (elapsed < 350) {
+                        cancelVideoRecording();
+                        setRecordingMode('voice');
+                    }
+                    else stopVideoRecording();
+                }
+              }}
             />
           )}
 
           {/* Unified capsule style composer block */}
-          <form onSubmit={handleMessageSend} className="flex-1 flex items-center gap-1.5 relative">
+          <form onSubmit={handleMessageSend} className="flex-1 flex items-center gap-2 relative z-30">
             {voicePreviewBlob ? (
               <div className="flex-1 flex items-center justify-between bg-black/45 hover:bg-black/55 border border-white/5 px-3 py-1.5 rounded-full text-xs text-slate-100 font-semibold shadow-inner select-none gap-2 min-h-[46px] animate-fade-in-up md:p-2 backdrop-blur-md">
                 <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -1948,191 +2308,284 @@ export const ChatWindow: React.FC = () => {
                   </button>
                 </div>
               </div>
-            ) : isRecording ? (
-              <div className="flex flex-1 items-center justify-between bg-[#0B0B0D]/95 md:bg-black/45 md:border border-white/5 px-2 md:px-3 py-1.5 rounded-full text-xs text-slate-100 font-semibold shadow-inner select-none min-h-[46px] animate-fade-in-up md:p-2 backdrop-blur-md gap-3">
-                {/* 1. Header Row (especially on mobile) with indicators and status */}
-                <div className="flex items-center justify-between md:justify-start gap-3 px-1">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                    </span>
-                    <span className="font-bold text-rose-500 font-mono tracking-wider text-[11px] uppercase">
-                      {language === 'ru' ? 'ЗАПИСЬ' : 'REC'}
-                    </span>
-                  </div>
+            ) : (
+              <>
+              <div className={`flex flex-1 relative items-center gap-1.5 transition-all duration-300 ${isRecording ? 'opacity-0 pointer-events-none scale-95' : 'opacity-100 scale-100'}`}>
+                <div className="flex-1 bg-black/15 hover:bg-black/25 focus-within:bg-black/30 border border-white/5 rounded-[24px] px-3.5 py-1.5 flex items-center gap-2 min-h-[44px] transition-all focus-within:border-[var(--glass-border-focus)] shadow-inner relative z-40">
+                  
+                  {/* 1. Smile Sticker picker */}
+                  <button
+                    type="button"
+                    onClick={() => setShowStickerPicker(!showStickerPicker)}
+                    className={`text-slate-400 hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0`}
+                    title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
+                  >
+                    <Smile className="w-4.5 h-4.5" />
+                  </button>
 
-                  <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400 bg-white/5 px-2 py-0.5 rounded-full">
-                    {recordingState === 'holding' 
-                      ? (language === 'ru' ? 'Удерживание' : 'Holding') 
-                      : (language === 'ru' ? 'Закреплено' : 'Locked')}
-                  </div>
+                  {/* 2. Compact text input Area */}
+                  <TextareaAutosize 
+                    ref={inputRef as any}
+                    value={inputText}
+                    disabled={cooldownRemaining > 0}
+                    maxRows={5}
+                    onChange={(e) => {
+                      handleInputChange(e.target.value);
+                      if (activeChat) sendTypingStatus(activeChat.id);
+                    }}
+                    onKeyDown={handleKeyDown}
+                    onPaste={(e) => {
+                      if (e.clipboardData.files && e.clipboardData.files[0]) {
+                        const file = e.clipboardData.files[0];
+                        setSelectedDraftFile(file);
+                        e.preventDefault();
+                      }
+                    }}
+                    placeholder={
+                      cooldownRemaining > 0 
+                        ? (language === 'ru' ? `Медленный режим: Подождите ${cooldownRemaining}с...` : `Slow Mode: Wait ${cooldownRemaining}s...`)
+                        : editTarget 
+                          ? (language === 'ru' ? "Изменить..." : "Change text...") 
+                          : (language === 'ru' ? "Cообщение..." : "Message...")
+                    }
+                    className="flex-1 bg-transparent text-slate-100 text-sm focus:outline-none placeholder-slate-650 min-h-[20px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-1 py-1"
+                  />
+
+                  {/* 3. Dropdown trigger action menu button and File Picker */}
+                  <button 
+                    type="button"
+                    disabled={cooldownRemaining > 0}
+                    onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
+                    className={`hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0 disabled:opacity-30 ${showAttachmentDropdown ? 'text-[var(--glass-accent)]' : 'text-slate-400'}`}
+                    title={language === 'ru' ? 'Прикрепить файл или действие' : 'Attachment & actions'}
+                  >
+                    <Paperclip className="w-4.5 h-4.5" />
+                  </button>
                 </div>
+              </div>
 
-                {/* 2. Waveform inside the middle area */}
-                <div className="flex-1 flex gap-[3px] items-center justify-center px-1 overflow-hidden min-h-[22px] max-w-[140px] md:max-w-xs mx-auto">
-                  {recordingAmplitudes.length === 0 ? (
-                    [6, 12, 18, 12, 6, 8, 14, 18, 10, 6, 12, 16, 9, 5].map((h, idx) => (
-                      <span key={idx} className="w-0.5 bg-rose-500/50 rounded-full" style={{ height: `${h}px` }} />
-                    ))
-                  ) : (
-                    recordingAmplitudes.map((amp, idx) => (
-                      <span key={idx} className="w-0.5 bg-rose-500/80 rounded-full transition-all duration-75" style={{ height: `${amp}px` }} />
-                    ))
-                  )}
-                </div>
+              {/* Recording UI Overlay */}
+              {isRecording && (
+                <div className="absolute inset-0 right-[52px] flex items-center justify-between bg-[#0B0B0D]/95 md:bg-black/45 border border-white/5 md:border-white/10 px-2 md:px-3 py-1.5 rounded-[24px] text-xs text-slate-100 font-semibold shadow-inner select-none min-h-[44px] animate-fade-in-up md:p-2 backdrop-blur-md gap-2 z-40">
+                  {/* 1. Header Row (especially on mobile) with indicators and status */}
+                  <div className="flex items-center justify-between md:justify-start gap-2 px-1 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                      </span>
+                      <span className="font-bold text-rose-500 font-mono tracking-wider text-[10px] uppercase hidden sm:inline">
+                        {language === 'ru' ? 'ЗАПИСЬ' : 'REC'}
+                      </span>
+                    </div>
 
-                {/* 3. Timer & Controls Row */}
-                <div className="flex items-center justify-between md:justify-end gap-2 px-1">
-                  <div className="font-mono text-xs text-rose-400 bg-rose-950/40 border border-rose-500/10 px-2.5 py-1 rounded-lg">
-                    {Math.floor(recordDuration / 60)}:{(recordDuration % 60).toString().padStart(2, '0')}
-                  </div>
-
-                  {/* Complete interactive controls grouping */}
-                  <div className="flex items-center gap-1.5">
-                    {/* Discard trash button */}
-                    <button 
-                      type="button" 
-                      onClick={cancelRecording}
-                      className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl cursor-pointer transition-all border border-rose-500/15 flex items-center gap-1.5 text-[11px] font-bold"
-                      title={language === 'ru' ? 'Удалить запись' : 'Cancel recording'}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">{language === 'ru' ? 'Удалить' : 'Delete'}</span>
-                    </button>
-                    
-                    {/* Stop and Review/Preview button */}
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        shouldSendOnStopRef.current = false;
-                        stopRecording();
-                      }}
-                      className="p-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/15 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 text-[11px] font-bold"
-                      title={language === 'ru' ? 'Остановить запись и прослушать' : 'Stop and review'}
-                    >
-                      <Square className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">{language === 'ru' ? 'Слушать' : 'Stop'}</span>
-                    </button>
-
-                    {/* Send direct button */}
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        shouldSendOnStopRef.current = true;
-                        stopRecording();
-                      }}
-                      className="p-2 bg-[var(--glass-accent)] text-white hover:opacity-95 rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 font-bold text-[11px]"
-                      title={language === 'ru' ? 'Отправить голосовое' : 'Send voice note'}
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{language === 'ru' ? 'Отправить' : 'Send'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Gesture Swipe Lock indicator tooltip in holding mode */}
-                {recordingState === 'holding' && (
-                  <div className="absolute inset-x-0 -top-8 flex justify-center pointer-events-none animate-pulse">
-                    <div className="bg-slate-900/95 text-[9px] text-[var(--glass-accent)] border border-cyan-500/15 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-lg backdrop-blur-md">
-                      <Lock className="w-2.5 h-2.5" />
-                      <span>{language === 'ru' ? 'Свайп вверх ⬆️ для фиксации или влево ⬅️ для отмены' : 'Swipe up ⬆️ to lock or left ⬅️ to cancel'}</span>
+                    <div className="text-[9px] uppercase font-mono tracking-wider text-slate-400 bg-white/5 px-1.5 py-0.5 rounded-full">
+                      {recordingState === 'holding' 
+                        ? (language === 'ru' ? 'Удерживание' : 'Holding') 
+                        : (language === 'ru' ? 'Закреплено' : 'Locked')}
                     </div>
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex-1 bg-black/15 hover:bg-black/25 focus-within:bg-black/30 border border-white/5 rounded-full px-3.5 py-1.5 flex items-center gap-2 min-h-[38px] transition-all focus-within:border-[var(--glass-border-focus)] shadow-inner">
-                
-                {/* 1. Smile Sticker picker */}
-                <button
-                  type="button"
-                  onClick={() => setShowStickerPicker(!showStickerPicker)}
-                  className={`text-slate-400 hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0`}
-                  title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
-                >
-                  <Smile className="w-4.5 h-4.5" />
-                </button>
 
-                {/* 2. Compact text input Area */}
-                <TextareaAutosize 
-                  ref={inputRef as any}
-                  value={inputText}
-                  disabled={cooldownRemaining > 0}
-                  maxRows={5}
-                  onChange={(e) => {
-                    handleInputChange(e.target.value);
-                    if (activeChat) sendTypingStatus(activeChat.id);
-                  }}
-                  onKeyDown={handleKeyDown}
-                  onPaste={(e) => {
-                    if (e.clipboardData.files && e.clipboardData.files[0]) {
-                      const file = e.clipboardData.files[0];
-                      setSelectedDraftFile(file);
-                      e.preventDefault();
-                    }
-                  }}
-                  placeholder={
-                    cooldownRemaining > 0 
-                      ? (language === 'ru' ? `Медленный режим: Подождите ${cooldownRemaining}с...` : `Slow Mode: Wait ${cooldownRemaining}s...`)
-                      : editTarget 
-                        ? (language === 'ru' ? "Изменить..." : "Change text...") 
-                        : (language === 'ru' ? "Cообщение..." : "Message...")
-                  }
-                  className="flex-1 bg-transparent text-slate-100 text-sm focus:outline-none placeholder-slate-650 min-h-[20px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-1 py-1"
-                />
+                  {/* 2. Waveform inside the middle area */}
+                  <div className="flex-1 flex gap-[2px] items-center justify-center px-1 overflow-hidden min-h-[22px] max-w-[140px] md:max-w-xs mx-auto">
+                    {recordingAmplitudes.length === 0 ? (
+                      [6, 12, 18, 12, 6, 8, 14, 18, 10, 6, 12, 16, 9, 5].map((h, idx) => (
+                        <span key={idx} className="w-[1.5px] bg-rose-500/50 rounded-full" style={{ height: `${h}px` }} />
+                      ))
+                    ) : (
+                      recordingAmplitudes.map((amp, idx) => (
+                        <span key={idx} className="w-[1.5px] bg-rose-500/80 rounded-full transition-all duration-75" style={{ height: `${amp}px` }} />
+                      ))
+                    )}
+                  </div>
 
-                {/* 3. Dropdown trigger action menu button and File Picker */}
-                <button 
-                  type="button"
-                  disabled={cooldownRemaining > 0}
-                  onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
-                  className={`hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0 disabled:opacity-30 ${showAttachmentDropdown ? 'text-[var(--glass-accent)]' : 'text-slate-400'}`}
-                  title={language === 'ru' ? 'Прикрепить файл или действие' : 'Attachment & actions'}
-                >
-                  <Paperclip className="w-4.5 h-4.5" />
-                </button>
-              </div>
+                  {/* 3. Timer & Controls Row */}
+                  <div className="flex items-center justify-end gap-1.5 px-0.5 shrink-0">
+                    <div className="font-mono text-[10px] text-rose-400 bg-rose-950/40 border border-rose-500/10 px-1.5 py-0.5 rounded-lg w-auto text-center">
+                      {Math.floor(recordDuration / 60)}:{(recordDuration % 60).toString().padStart(2, '0')}
+                    </div>
+
+                    {/* Complete interactive controls grouping */}
+                    <div className="flex items-center gap-1">
+                      {/* Discard trash button */}
+                      <button 
+                        type="button" 
+                        onClick={cancelRecording}
+                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg cursor-pointer transition-all border border-rose-500/15 flex items-center justify-center h-7 w-7"
+                        title={language === 'ru' ? 'Удалить запись' : 'Cancel recording'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                      
+                      {/* Stop and Review/Preview button */}
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          shouldSendOnStopRef.current = false;
+                          stopRecording();
+                        }}
+                        className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/15 rounded-lg cursor-pointer transition-all flex items-center justify-center h-7 w-7"
+                        title={language === 'ru' ? 'Остановить запись и прослушать' : 'Stop and review'}
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Send direct button */}
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          shouldSendOnStopRef.current = true;
+                          stopRecording();
+                        }}
+                        className="p-1.5 bg-[var(--glass-accent)] text-white hover:opacity-95 rounded-lg cursor-pointer transition-all flex items-center justify-center h-7 w-7"
+                        title={language === 'ru' ? 'Отправить голосовое' : 'Send voice note'}
+                      >
+                        <Send className="w-3 h-3 ml-0.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Gesture Swipe Lock indicator tooltip in holding mode */}
+                  {recordingState === 'holding' && (
+                    <>
+                      <div className="absolute inset-x-0 -top-12 flex justify-center pointer-events-none transition-opacity duration-150 z-50">
+                        <div className={`bg-slate-900/95 text-[10px] border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg backdrop-blur-md transition-all ${
+                          recordGestures.startY - recordGestures.currentY > 30 
+                            ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10 scale-110 font-bold' 
+                            : recordGestures.startX - recordGestures.currentX > 40
+                            ? 'border-rose-500/50 text-rose-400 bg-rose-500/10 scale-110 font-bold'
+                            : 'border-cyan-500/15 text-[var(--glass-accent)]'
+                        }`}>
+                          {recordGestures.startY - recordGestures.currentY > 30 ? (
+                            <>
+                              <Lock className="w-3 h-3" />
+                              <span>{language === 'ru' ? 'Отпустите для фиксации' : 'Release to Lock'}</span>
+                            </>
+                          ) : recordGestures.startX - recordGestures.currentX > 40 ? (
+                            <>
+                              <Trash2 className="w-3 h-3" />
+                              <span>{language === 'ru' ? 'Отпустите для отмены' : 'Release to Cancel'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="w-3 h-3" />
+                              <span>{language === 'ru' ? 'Свайп ⬆️ фиксация / ⬅️ отмена' : 'Swipe ⬆️ to lock / ⬅️ to cancel'}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {/* Floating Mic for gesture drag feedback representing the finger */}
+                      <div 
+                        className={`fixed z-[10000] pointer-events-none drop-shadow-[0_0_15px_rgba(6,182,212,0.6)] flex items-center justify-center p-3.5 rounded-full text-white shadow-xl transition-all ${
+                          recordGestures.startX - recordGestures.currentX > 40 ? 'bg-rose-500' : 'bg-[var(--glass-accent)]'
+                        }`}
+                        style={{
+                          left: recordGestures.currentX - 25,
+                          top: recordGestures.currentY - 25,
+                          transform: `scale(${recordGestures.startX - recordGestures.currentX > 40 ? 0.8 : recordGestures.startY - recordGestures.currentY > 30 ? 1.3 : 1.15})`,
+                          opacity: recordGestures.startX - recordGestures.currentX > 40 ? 0.7 : 1
+                        }}
+                      >
+                        <Mic className="w-6 h-6 animate-pulse" />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              </>
             )}
 
             {/* Flight Send command or voice message recorder key (adjacent round button) */}
-            {!voicePreviewBlob && !isRecording && (
-              <div className="shrink-0 animate-fade-in">
+            {!voicePreviewBlob && (
+              <div className={`shrink-0 transition-all duration-300 ease-in-out flex items-center justify-center overflow-hidden ${
+                isRecording 
+                  ? 'opacity-0 scale-50 w-0 -ml-1.5' 
+                  : 'opacity-100 scale-100 w-11'
+              }`}>
                 {cooldownRemaining > 0 ? (
                   <button
                     type="button"
                     disabled
-                    className="p-2 bg-slate-900/40 border border-slate-800/80 rounded-full text-amber-500 shrink-0 transition-all shadow-md h-9 w-9 flex items-center justify-center"
+                    className="p-2.5 bg-slate-900/40 border border-slate-800/80 rounded-full text-amber-500 shrink-0 transition-all shadow-md h-11 w-11 flex items-center justify-center"
                     title={language === 'ru' ? `Медленный режим: Подождите еще ${cooldownRemaining}с` : `Slow Mode: Wait ${cooldownRemaining}s`}
                   >
-                    <Clock className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
+                    <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
                   </button>
                 ) : inputText.trim() || selectedDraftFile ? (
                   <button 
                     type="submit" 
                     disabled={!inputText.trim() && !selectedDraftFile}
-                    className="p-2 bg-[var(--glass-accent)] hover:opacity-90 disabled:opacity-30 rounded-full text-white font-bold shadow-lg flex items-center justify-center h-9 w-9 transition-all border border-white/10 cursor-pointer active:scale-95"
+                    className="relative p-2.5 bg-[var(--glass-accent)] hover:opacity-90 disabled:opacity-30 rounded-full text-white font-bold shadow-lg flex items-center justify-center h-11 w-11 transition-all border border-white/10 cursor-pointer active:scale-95 z-50 before:absolute before:-inset-4 before:content-['']"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 ) : (
                   <button
                     type="button"
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      startRecording(e.clientX, e.clientY);
+                      pressStartTimeRef.current = Date.now();
+                      if (recordingMode === 'voice') {
+                        startRecording(e.clientX, e.clientY);
+                      } else {
+                        startVideoRecording();
+                      }
                     }}
                     onTouchStart={(e) => {
+                      e.preventDefault();
                       if (document.activeElement instanceof HTMLElement) {
                         document.activeElement.blur();
                       }
                       const touch = e.touches[0];
-                      startRecording(touch.clientX, touch.clientY);
+                      pressStartTimeRef.current = Date.now();
+                      if (recordingMode === 'voice') {
+                        startRecording(touch.clientX, touch.clientY);
+                      } else {
+                        startVideoRecording();
+                      }
                     }}
-                    className="p-2 bg-black/15 border border-white/5 hover:bg-black/25 rounded-full text-[var(--glass-accent)] hover:text-rose-500 shrink-0 transition-all shadow-md cursor-pointer select-none h-9 w-9 flex items-center justify-center active:scale-95"
-                    title={language === 'ru' ? 'Удерживайте для записи голоса' : 'Hold to Record Audio'}
+                    onTouchMove={(e) => {
+                      if (recordingMode === 'voice' && recordingState === 'holding') {
+                        const touch = e.touches[0];
+                        handleRecordMove(touch.clientX, touch.clientY);
+                      }
+                    }}
+                    onMouseUp={() => {
+                      const elapsed = Date.now() - pressStartTimeRef.current;
+                      if (recordingMode === 'voice') {
+                        handleRecordRelease();
+                      } else {
+                        if (elapsed < 350) {
+                          cancelVideoRecording();
+                          setRecordingMode('voice');
+                        } else {
+                          stopVideoRecording();
+                        }
+                      }
+                    }}
+                    onTouchEnd={() => {
+                      const elapsed = Date.now() - pressStartTimeRef.current;
+                      if (recordingMode === 'voice') {
+                        handleRecordRelease();
+                      } else {
+                        if (elapsed < 350) {
+                          cancelVideoRecording();
+                          setRecordingMode('voice');
+                        } else {
+                          stopVideoRecording();
+                        }
+                      }
+                    }}
+                    className={`relative p-2.5 bg-black/15 border border-white/5 hover:bg-black/25 rounded-full shrink-0 transition-all shadow-md cursor-pointer select-none h-11 w-11 flex items-center justify-center active:scale-95 touch-none z-50 before:absolute before:-inset-4 before:content-[''] ${
+                      recordingMode === 'video' ? 'text-amber-400 hover:text-amber-500 hover:scale-105' : 'text-[var(--glass-accent)] hover:text-rose-500 hover:scale-105'
+                    }`}
+                    title={
+                      recordingMode === 'voice'
+                        ? (language === 'ru' ? 'Запись голоса (зажмите) / Смена режима (нажмите)' : 'Voice Message (hold) / Tap to toggle')
+                        : (language === 'ru' ? 'Кружочек (зажмите) / Смена режима (нажмите)' : 'Video Note (hold) / Tap to toggle')
+                    }
                   >
-                    <Mic className="w-4 h-4" />
+                    {recordingMode === 'voice' ? <Mic className="w-5 h-5" /> : <Video className="w-5 h-5 text-amber-400" />}
                   </button>
                 )}
               </div>
@@ -2142,13 +2595,32 @@ export const ChatWindow: React.FC = () => {
       </div>
 
       {/* Poll Creator Portal Overlay */}
-      {showPollCreator && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in select-none">
-          <div className="w-full max-w-sm bg-[#0E0E10] border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-900 pb-2">
-              <span className="font-bold text-slate-205 text-sm flex items-center gap-1.5">📊 {language === 'ru' ? 'Создать новый опрос' : 'Create Poll'}</span>
-              <button type="button" onClick={() => setShowPollCreator(false)} className="text-slate-500 hover:text-slate-300 cursor-pointer text-sm font-bold bg-[#1A1A1E] px-2 py-0.5 rounded-md">✕</button>
-            </div>
+      <AnimatePresence>
+        {showPollCreator && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 select-none"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={0.3}
+              onDragEnd={(e, info) => {
+                if (info.offset.y > 60 || info.offset.y < -60) {
+                  setShowPollCreator(false);
+                }
+              }}
+              className="w-full max-w-sm bg-[#0E0E10] border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4"
+            >
+              <div className="flex justify-between items-center border-b border-slate-900 pb-2" style={{ touchAction: 'none' }}>
+                <span className="font-bold text-slate-205 text-sm flex items-center gap-1.5">📊 {language === 'ru' ? 'Создать новый опрос' : 'Create Poll'}</span>
+                <button type="button" onClick={() => setShowPollCreator(false)} className="text-slate-500 hover:text-slate-300 cursor-pointer text-sm font-bold bg-[#1A1A1E] px-2 py-0.5 rounded-md">✕</button>
+              </div>
             
             <div className="space-y-3">
               <div>
@@ -2213,67 +2685,107 @@ export const ChatWindow: React.FC = () => {
             >
               🚀 {language === 'ru' ? 'Выпустить опрос в эфир' : 'Publish interactive poll'}
             </button>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Selected Image Fullscreen Modal Viewer */}
-      {selectedImage && (
-        <div 
-          className="fixed inset-0 bg-black/95 backdrop-blur z-[200] flex items-center justify-center p-2 sm:p-4 select-none cursor-zoom-out"
-          onClick={() => setSelectedImage(null)}
-        >
-          <button 
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}
-            className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition cursor-pointer z-10 border border-white/10"
-            title={language === 'ru' ? 'Закрыть' : 'Close'}
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/95 backdrop-blur z-[200] flex items-center justify-center p-2 sm:p-4 select-none cursor-zoom-out"
+            onClick={() => setSelectedImage(null)}
           >
-            <X className="w-5 h-5" />
-          </button>
-          
-          <img 
-            src={selectedImage} 
-            alt="Fullscreen preview" 
-            className="max-w-full max-h-full object-contain cursor-default" 
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={() => setSelectedImage(null)} 
-          />
-        </div>
-      )}
+            <button 
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}
+              className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition cursor-pointer z-[210] border border-white/10"
+              title={language === 'ru' ? 'Закрыть' : 'Close'}
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <motion.img 
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={0.4}
+              onDragEnd={(e, info) => {
+                if (Math.abs(info.offset.y) > 100) {
+                  setSelectedImage(null);
+                }
+              }}
+              src={selectedImage} 
+              alt="Fullscreen preview" 
+              className="max-w-full max-h-full object-contain cursor-default" 
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Selected User Full Profile Modal Viewer */}
-      {selectedUserProfile && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="w-full max-w-sm glass-panel text-slate-100 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col relative animate-scale-up" style={{ background: 'var(--glass-sidebar-bg)' }}>
-            
-            {/* Upper cover area */}
-            <div className="h-24 bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border-b border-white/5 relative shrink-0">
-              <button 
-                onClick={() => setSelectedUserProfile(null)}
-                className="absolute top-3.5 right-3.5 p-1 bg-black/35 hover:bg-black/55 text-slate-350 hover:text-white rounded-full transition cursor-pointer"
-                title={language === 'ru' ? 'Закрыть' : 'Close'}
+      <AnimatePresence>
+        {selectedUserProfile && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-hidden"
+            onClick={() => setSelectedUserProfile(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={0.3}
+              onDragEnd={(e, info) => {
+                if (info.offset.y > 100 || info.offset.y < -100) {
+                  setSelectedUserProfile(null);
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm glass-panel text-slate-100 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col relative" 
+              style={{ background: 'var(--glass-sidebar-bg)' }}
+            >
+              
+              {/* Upper cover area */}
+              <div className="h-24 bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border-b border-white/5 relative shrink-0"
+                   style={{ touchAction: 'none' }} // Prevents default touch moves acting strangely during drag
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Avatar overlay */}
-            <div className="flex flex-col items-center px-6 -mt-12 pb-6 relative">
-              <div className="relative">
-                <img 
-                  src={selectedUserProfile.photoURL} 
-                  alt={selectedUserProfile.displayName} 
-                  className="w-24 h-24 rounded-full border-4 border-slate-950/40 object-cover shadow-2xl relative bg-slate-950" 
-                />
-                {selectedUserProfile.emojiStatus && (
-                  <span className="absolute bottom-0 right-0 w-7 h-7 bg-black/75 border border-white/15 rounded-full flex items-center justify-center text-xs shadow-lg animate-bounce" style={{ animationDuration: '3s' }}>
-                    {selectedUserProfile.emojiStatus}
-                  </span>
-                )}
+                <button 
+                  onClick={() => setSelectedUserProfile(null)}
+                  className="absolute top-3.5 right-3.5 p-1 bg-black/35 hover:bg-black/55 text-slate-350 hover:text-white rounded-full transition cursor-pointer"
+                  title={language === 'ru' ? 'Закрыть' : 'Close'}
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="font-semibold text-lg text-slate-100 mt-3 text-center flex items-center justify-center gap-1.5 leading-tight">
+              {/* Avatar overlay */}
+              <div className="flex flex-col items-center px-6 -mt-12 pb-6 relative">
+                <div className="relative pointer-events-none">
+                  <img 
+                    src={selectedUserProfile.photoURL} 
+                    alt={selectedUserProfile.displayName} 
+                    className="w-24 h-24 rounded-full border-4 border-slate-950/40 object-cover shadow-2xl relative bg-slate-950" 
+                  />
+                  {selectedUserProfile.emojiStatus && (
+                    <span className="absolute bottom-0 right-0 w-7 h-7 bg-black/75 border border-white/15 rounded-full flex items-center justify-center text-xs shadow-lg animate-bounce" style={{ animationDuration: '3s' }}>
+                      {selectedUserProfile.emojiStatus}
+                    </span>
+                  )}
+                </div>
+
+                <div className="font-semibold text-lg text-slate-100 mt-3 text-center flex items-center justify-center gap-1.5 leading-tight">
                 {selectedUserProfile.displayName}
               </div>
               <div className="text-xs font-mono text-cyan-400 mt-1">@{selectedUserProfile.username}</div>
@@ -2370,9 +2882,10 @@ export const ChatWindow: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Mobile Context Menu Bottom Sheet */}
       <AnimatePresence>
@@ -2470,6 +2983,33 @@ export const ChatWindow: React.FC = () => {
             </motion.div>
           </>
         )}
+      </AnimatePresence>
+
+      {/* Floating emoji reactions canvas layer */}
+      <AnimatePresence>
+        {activeFloatingReactions.map((reaction) => (
+          <motion.div
+            key={reaction.id}
+            initial={{ opacity: 0, scale: 0.3, y: reaction.y, x: reaction.x - 20 }}
+            animate={{ 
+              opacity: [0, 1, 1, 0],
+              scale: [0.3, 1.6, 1.4, 0.8],
+              y: reaction.y - 120, // Float up by 120px
+              x: reaction.x - 20 + Math.sin(reaction.y) * 15, // Sine wave sway
+            }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.2, ease: "easeOut" }}
+            style={{
+              position: 'fixed',
+              pointerEvents: 'none',
+              zIndex: 9999,
+              fontSize: '2.5rem',
+              textShadow: '0 0 10px rgba(0,0,0,0.5)',
+            }}
+          >
+            {reaction.emoji}
+          </motion.div>
+        ))}
       </AnimatePresence>
     </div>
   );
