@@ -3,11 +3,6 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
-import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
-import { getOrCreateUser } from "./src/db/users.ts";
-import { db } from "./src/db/index.ts";
-import { chats, messages, calls } from "./src/db/schema.ts";
-import { eq } from "drizzle-orm";
 
 dotenv.config();
 
@@ -21,93 +16,7 @@ async function startServer() {
 
   // --- API Routes (MUST run before Vite middleware) ---
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", database: process.env.SQL_DB_NAME ? "configured" : "offline" });
-  });
-
-  // User synchronization route
-  app.post("/api/users/sync", requireAuth, async (req: AuthRequest, res) => {
-    if (!req.user) {
-      return res.status(401).json({ error: "Missing authentication payload" });
-    }
-    try {
-      const { email, uid, name, picture } = req.user;
-      const user = await getOrCreateUser(
-        uid,
-        email || `${uid}@placeholder.com`,
-        undefined,
-        name,
-        picture
-      );
-      res.json({ status: "success", user });
-    } catch (error: any) {
-      console.error("Error syncing user to database:", error);
-      res.status(500).json({ error: error.message || "Failed to sync user data" });
-    }
-  });
-
-  // Fetch or create user record
-  app.get("/api/users/profile", requireAuth, async (req: AuthRequest, res) => {
-    if (!req.user) {
-      return res.status(401).json({ error: "Missing authentication payload" });
-    }
-    try {
-      const { uid, email } = req.user;
-      const user = await getOrCreateUser(uid, email || `${uid}@placeholder.com`);
-      res.json(user);
-    } catch (error: any) {
-      console.error("Error retrieving profile:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch user profile" });
-    }
-  });
-
-  // Log voice call history
-  app.post("/api/calls", requireAuth, async (req: AuthRequest, res) => {
-    try {
-      const { uuid, receiverId, status } = req.body;
-      const callerId = req.user?.uid;
-      if (!uuid || !callerId || !receiverId) {
-        return res.status(400).json({ error: "Missing required call details" });
-      }
-
-      const newCall = await db.insert(calls)
-        .values({
-          uuid,
-          callerId,
-          receiverId,
-          status: status || 'ringing'
-        })
-        .onConflictDoUpdate({
-          target: calls.uuid,
-          set: { status: status || 'ringing' }
-        })
-        .returning();
-
-      res.status(201).json(newCall[0]);
-    } catch (error: any) {
-      console.error("Database call logging failed:", error);
-      res.status(500).json({ error: "Failed to log call history" });
-    }
-  });
-
-  // Update call status
-  app.patch("/api/calls/:uuid", requireAuth, async (req: AuthRequest, res) => {
-    try {
-      const { uuid } = req.params;
-      const { status } = req.body;
-      if (!uuid || !status) {
-        return res.status(400).json({ error: "Missing required call update details" });
-      }
-
-      const updated = await db.update(calls)
-        .set({ status })
-        .where(eq(calls.uuid, uuid))
-        .returning();
-
-      res.json(updated[0] || { status: "not_found" });
-    } catch (error: any) {
-      console.error("Database call update failed:", error);
-      res.status(500).json({ error: "Failed to update call history" });
-    }
+    res.json({ status: "ok", database: "firestore-only" });
   });
 
   // Automated metadata scraper for web page previews

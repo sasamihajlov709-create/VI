@@ -273,9 +273,8 @@ export function useVoiceRecorder(
       const distanceY = recordGestures.startY - recordGestures.currentY;
       const holdDuration = Date.now() - recordingStartTimeRef.current;
       
-      if (holdDuration < 350) {
+      if (holdDuration < 150) {
         cancelRecording();
-        if (onToggleMode) onToggleMode();
       } else if (distanceX > 80) {
         cancelRecording();
       } else if (distanceY > 60) {

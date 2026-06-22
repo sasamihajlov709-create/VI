@@ -39,12 +39,13 @@ try {
   db = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
-    })
+    }),
+    ignoreUndefinedProperties: true
   }, "ai-studio-03df1928-84c7-4b65-808b-917a3bc54b8c");
 } catch (e) {
   console.warn("Failed to initialize Firestore with persistent local cache, trying default settings with database ID:", e);
   try {
-    db = initializeFirestore(app, {}, "ai-studio-03df1928-84c7-4b65-808b-917a3bc54b8c");
+    db = initializeFirestore(app, { ignoreUndefinedProperties: true }, "ai-studio-03df1928-84c7-4b65-808b-917a3bc54b8c");
   } catch (e2) {
     console.warn("Failed to initialize Firestore with database ID, trying to get existing Firestore instance:", e2);
     try {

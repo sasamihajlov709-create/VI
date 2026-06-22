@@ -932,7 +932,7 @@ export const Sidebar: React.FC = () => {
                       e.preventDefault();
                       setSidebarCtxMenu(chat.id);
                     }}
-                    className={`flex h-full w-full items-center gap-3 cursor-pointer select-none relative bg-[#121215] ${isActive ? 'bg-white/[0.07] border-l-2 border-[var(--glass-accent)] px-5' : 'hover:bg-white/[0.03] px-5 py-2'}`}
+                    className={`flex h-full w-full items-center gap-3 cursor-pointer select-none relative transition-all duration-200 ${isActive ? 'bg-white/[0.09] border-l-2 border-[var(--glass-accent)] px-5 py-3 border-b border-white/[0.05]' : 'hover:bg-white/[0.03] bg-transparent px-5 py-2.5 border-b border-white/[0.02]'}`}
                   >
                     {/* Context Menu Overlay */}
                     {sidebarCtxMenu === chat.id && (
@@ -1046,6 +1046,7 @@ export const Sidebar: React.FC = () => {
         />
       ) : sidebarView === 'settings' ? (
         <SidebarSettingsView
+          onBack={() => setSidebarView('chats')}
           userProfile={userProfile}
           currentUser={currentUser}
           globalReports={globalReports}

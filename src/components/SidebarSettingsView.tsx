@@ -8,6 +8,7 @@ import {
 import { UserProfile } from '../types';
 
 interface SidebarSettingsViewProps {
+  onBack: () => void;
   userProfile: UserProfile | null;
   currentUser: { email: string | null } | null;
   globalReports: any[];
@@ -278,6 +279,7 @@ const LOCALIZATION = {
 };
 
 export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
+  onBack,
   userProfile,
   currentUser,
   globalReports = [],
@@ -292,6 +294,21 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
   setTheme
 }) => {
   const t = LOCALIZATION[language];
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
 
   // Primary subscreen navigation state
   const [subScreen, setSubScreen] = useState<'main' | 'account' | 'chats' | 'notifications' | 'privacy' | 'appearance' | 'data' | 'language' | 'security' | 'help' | 'admin'>('main');
@@ -491,7 +508,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (err: any) {
-      alert("Save error response: " + err.message);
+      showToast("Save error response: " + err.message, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -517,14 +534,23 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
       {subScreen === 'main' && (
         <div className="flex-1 flex flex-col min-h-0">
           {/* Header */}
-          <div className="p-4 border-b border-white/5 flex flex-col gap-1 shrink-0 bg-white/[0.01]">
-            <h2 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-cyan-400" />
-              {t.title}
-            </h2>
-            <span className="text-[10px] text-slate-400 font-medium">
-              {t.subtitle}
-            </span>
+          <div className="p-4 border-b border-white/5 flex gap-2 shrink-0 bg-white/[0.01]">
+            <button 
+              type="button" 
+              onClick={onBack}
+              className="p-1 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition cursor-pointer self-start"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div className="flex flex-col gap-1">
+              <h2 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                {t.title}
+              </h2>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {t.subtitle}
+              </span>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
@@ -557,7 +583,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                         try {
                           await uploadAvatar(file);
                         } catch (err: any) {
-                          alert("Photo error: " + err.message);
+                          showToast("Photo error: " + err.message, 'error');
                         } finally {
                           setIsUploadingPhoto(false);
                         }
@@ -912,16 +938,15 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
               <span className="block text-xs font-mono text-slate-350 font-bold uppercase tracking-wide leading-none">{t.secThemes}</span>
               <div className="grid grid-cols-3 gap-1 text-[9px] text-center font-mono">
                 {[
-                  { id: 'dark', label: language === 'ru' ? 'Тёмная' : 'Dark' },
-                  { id: 'light', label: language === 'ru' ? 'Светлая' : 'Light' },
-                  { id: 'glass', label: language === 'ru' ? 'Стекло' : 'Glass' }
+                  { id: 'theme-midnight-glass', label: language === 'ru' ? 'Тёмная' : 'Dark' },
+                  { id: 'theme-light-glass', label: language === 'ru' ? 'Светлая' : 'Light' },
+                  { id: 'theme-dark-glass', label: language === 'ru' ? 'Стекло' : 'Glass' }
                 ].map((th) => (
                   <button
                     key={th.id}
                     onClick={() => {
-                      localStorage.setItem('vi-active-theme', th.id);
-                      window.dispatchEvent(new Event('vi-settings-changed'));
-                      alert(language === 'ru' ? `Тема "${th.label}" применена!` : `Theme "${th.label}" updated!`);
+                      setTheme(th.id);
+                      showToast(language === 'ru' ? `Тема "${th.label}" применена!` : `Theme "${th.label}" updated!`);
                     }}
                     className="py-1 px-1.5 border border-white/5 bg-white/[0.01] rounded hover:border-cyan-500/30 text-slate-300 transition cursor-pointer"
                   >
@@ -1382,7 +1407,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                 <button 
                   onClick={() => {
                     terminateOtherSessions().then(() => {
-                      alert(language === 'ru' ? 'Прочие сеансы терминированы!' : 'Other hardware sessions revoked!');
+                      showToast(language === 'ru' ? 'Прочие сеансы завершены!' : 'Other hardware sessions revoked!');
                     });
                   }}
                   className="text-[8px] uppercase font-mono px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded hover:bg-amber-500/25 text-amber-300 cursor-pointer transition active:scale-95"
@@ -1424,8 +1449,8 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
               <button 
                 onClick={() => {
                   localStorage.clear();
-                  alert(language === 'ru' ? 'Кэш очищен!' : 'Sandbox parameters registry cleaned up!');
-                  window.location.reload();
+                  showToast(language === 'ru' ? 'Кэш очищен! Перезапуск...' : 'Sandbox cleared! Reloading...', 'info');
+                  setTimeout(() => window.location.reload(), 1500);
                 }}
                 className="w-full py-2 bg-rose-950/20 border border-rose-500/20 rounded-xl font-mono uppercase text-[9px] font-bold text-rose-300 cursor-pointer"
               >
@@ -1463,9 +1488,8 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                     onClick={() => {
                       localStorage.setItem('vi-localization-pref', langOpt.code);
                       window.dispatchEvent(new Event('vi-settings-changed'));
-                      // Simple location trigger or manual state update
-                      alert(langOpt.code === 'ru' ? 'Локализация изменена!' : 'Language successfully switched!');
-                      window.location.reload();
+                      showToast(langOpt.code === 'ru' ? 'Локализация изменена! Перезагрузка...' : 'Language successfully switched! Reloading...', 'success');
+                      setTimeout(() => window.location.reload(), 1500);
                     }}
                     className={`w-full p-2.5 rounded-xl border text-left flex justify-between items-center transition cursor-pointer text-[11px] ${
                       language === langOpt.code 
@@ -1576,7 +1600,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
 
             {/* Diagnostic reporting tool */}
             <button
-              onClick={() => alert(t.reportSuccess)}
+              onClick={() => showToast(t.reportSuccess, 'success')}
               className="w-full py-2 bg-cyan-950/20 hover:bg-cyan-950/40 border border-cyan-500/20 text-cyan-300 font-mono uppercase text-[9px] font-bold rounded-xl cursor-pointer transition active:scale-95"
             >
               {t.sendReport}
@@ -1650,6 +1674,13 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="absolute bottom-6 left-4 right-4 z-50 bg-slate-950/95 border border-cyan-500/35 text-[11px] font-medium py-3 px-4 rounded-xl flex items-center gap-2.5 text-slate-100 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${toast.type === 'error' ? 'bg-rose-500 animate-pulse' : toast.type === 'info' ? 'bg-amber-400' : 'bg-green-400'}`} />
+          <span className="flex-1 text-left text-slate-200">{toast.message}</span>
         </div>
       )}
     </div>

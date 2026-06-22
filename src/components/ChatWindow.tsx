@@ -453,6 +453,21 @@ export const ChatWindow: React.FC = () => {
 
   const { t, language } = useLanguage();
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
+
   // Scroll Container ref and input focal element
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -513,6 +528,7 @@ export const ChatWindow: React.FC = () => {
   const [showInChatSearch, setShowInChatSearch] = useState(false);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showAttachmentDropdown, setShowAttachmentDropdown] = useState(false);
+  const [showScheduleDropdown, setShowScheduleDropdown] = useState(false);
 
   // Floating emoji reaction animations state
   const [activeFloatingReactions, setActiveFloatingReactions] = useState<{
@@ -665,7 +681,7 @@ export const ChatWindow: React.FC = () => {
       setUploadingSticker(true);
       await uploadSticker(file);
     } catch (err: any) {
-      alert(language === 'ru' ? 'Ошибка загрузки стикера: ' + err.message : 'Error uploading sticker: ' + err.message);
+      showToast(language === 'ru' ? 'Ошибка загрузки стикера: ' + err.message : 'Error uploading sticker: ' + err.message, 'error');
     } finally {
       setUploadingSticker(false);
     }
@@ -676,12 +692,15 @@ export const ChatWindow: React.FC = () => {
   const [recordingMode, setRecordingMode] = useState<'voice' | 'video'>('voice');
   const pressStartTimeRef = useRef<number>(0);
   const [recordVideoDuration, setRecordVideoDuration] = useState(0);
+  const [videoRecordingState, setVideoRecordingState] = useState<'idle' | 'holding' | 'locked'>('idle');
+  const [videoGestures, setVideoGestures] = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const videoTimerRef = useRef<any>(null);
   const isVideoCancelledRef = useRef<boolean>(false);
+  const recordingPressTimerRef = useRef<any>(null);
 
   // File Upload Draft tracker
   const [selectedDraftFile, setSelectedDraftFile] = useState<File | null>(null);
@@ -728,7 +747,7 @@ export const ChatWindow: React.FC = () => {
 
     // Filter normal vs scheduled queue messages
     if (viewScheduledMode) {
-      list = list.filter(m => m.scheduledAt && Date.now() < m.scheduledAt);
+      list = list.filter(m => m.scheduledAt && Date.now() < m.scheduledAt && m.senderId === currentUser?.uid);
     } else {
       list = list.filter(m => !m.scheduledAt || Date.now() >= m.scheduledAt);
     }
@@ -884,12 +903,14 @@ export const ChatWindow: React.FC = () => {
   }, [isAtBottom, scrollToBottom]);
 
   // Video Note Circular camera recording
-  const startVideoRecording = async () => {
+  const startVideoRecording = async (clientX: number, clientY: number) => {
     try {
       isVideoCancelledRef.current = false;
       videoRecorderRef.current = null;
       setIsRecordingVideo(true);
       setRecordVideoDuration(0);
+      setVideoRecordingState('holding');
+      setVideoGestures({ startX: clientX, startY: clientY, currentX: clientX, currentY: clientY });
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: true, 
         video: { width: 320, height: 320, facingMode: 'user' } 
@@ -951,11 +972,12 @@ export const ChatWindow: React.FC = () => {
     } catch (err: any) {
       setIsRecordingVideo(false);
       logger.error("Camera webcam capture initiation error:", { error: err.message, stack: err.stack });
-      alert(language === 'ru' ? 'Ошибка запуска веб-камеры. Проверьте права доступа в браузере.' : 'Failed to launch circular video note capture. Verify permissions.');
+      showToast(language === 'ru' ? 'Ошибка запуска веб-камеры. Проверьте права доступа в браузере.' : 'Failed to launch circular video note capture. Verify permissions.', 'error');
     }
   };
 
   const stopVideoRecording = () => {
+    setVideoRecordingState('idle');
     if (!videoRecorderRef.current) {
       isVideoCancelledRef.current = true;
       setIsRecordingVideo(false);
@@ -969,6 +991,7 @@ export const ChatWindow: React.FC = () => {
 
   const cancelVideoRecording = () => {
     isVideoCancelledRef.current = true;
+    setVideoRecordingState('idle');
     if (videoRecorderRef.current && isRecordingVideo) {
       videoRecorderRef.current.onstop = null;
       videoRecorderRef.current.stop();
@@ -977,6 +1000,38 @@ export const ChatWindow: React.FC = () => {
       setRecordVideoDuration(0);
       if (videoStreamRef.current) {
         videoStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+    }
+  };
+
+  const handleVideoRecordMove = (clientX: number, clientY: number) => {
+    if (videoRecordingState !== 'holding') return;
+    
+    setVideoGestures(prev => {
+      const current = { ...prev, currentX: clientX, currentY: clientY };
+      const distanceX = prev.startX - clientX;
+      const distanceY = prev.startY - clientY;
+      
+      if (distanceX > 80) {
+        setTimeout(() => cancelVideoRecording(), 10);
+      } else if (distanceY > 60) {
+        setVideoRecordingState('locked');
+      }
+      return current;
+    });
+  };
+
+  const handleVideoRecordRelease = () => {
+    if (videoRecordingState === 'holding') {
+      const distanceX = videoGestures.startX - videoGestures.currentX;
+      const distanceY = videoGestures.startY - videoGestures.currentY;
+      
+      if (distanceX > 80) {
+        cancelVideoRecording();
+      } else if (distanceY > 60) {
+        setVideoRecordingState('locked');
+      } else {
+        stopVideoRecording();
       }
     }
   };
@@ -1068,7 +1123,7 @@ export const ChatWindow: React.FC = () => {
 
   const triggerCopyAction = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert(language === 'ru' ? 'Текст скопирован в буфер обмена' : 'Text copied to clipboard');
+    showToast(language === 'ru' ? 'Текст скопирован в буфер обмена' : 'Text copied to clipboard', 'success');
   };
 
   if (!activeChat) {
@@ -1085,8 +1140,17 @@ export const ChatWindow: React.FC = () => {
       .slice(0, 3);
 
     return (
-      <div className="hidden md:flex flex-1 bg-[#09090A] flex-col p-8 md:p-12 overflow-y-auto h-full justify-center select-none">
-        <div className="max-w-3xl w-full mx-auto space-y-8 animate-fade-in-up">
+      <div className="hidden md:flex flex-1 bg-[#07080b] flex-col p-8 md:p-12 overflow-y-auto h-full justify-center select-none relative">
+        {/* Futuristic Glass Ambient Background Wallpaper Overlay */}
+        <div className="absolute inset-0 z-0 opacity-80 pointer-events-none" style={{
+          backgroundImage: `
+            radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.1), transparent 70%),
+            radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05), transparent 50%)
+          `,
+          backgroundAttachment: 'fixed',
+          pointerEvents: 'none'
+        }} />
+        <div className="max-w-3xl w-full mx-auto space-y-8 animate-fade-in-up relative z-10">
           
           {/* Main welcome banner with dynamic greeting & user avatar */}
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6 bg-white/[0.02] border border-white/5 p-6 md:p-8 rounded-3xl backdrop-blur-md relative overflow-hidden shadow-xl">
@@ -1258,16 +1322,18 @@ export const ChatWindow: React.FC = () => {
       )}
 
       {/* Dynamic Header */}
-      <div className="px-3.5 md:px-6 py-2 md:py-3 bg-[#0A0A0A]/95 border-b border-[#1A1A1A] flex justify-between items-center z-20 shrink-0 shadow-lg">
-        <div className="flex items-center gap-2 md:gap-3.5 min-w-0">
+      <div className="px-4 md:px-6 py-3 bg-white/[0.02] backdrop-blur-md border-b border-white/[0.05] flex justify-between items-center z-20 shrink-0 shadow-md">
+        <div className="flex items-center gap-3.5 min-w-0">
           {/* Back button on mobile */}
           <button 
             type="button"
             onClick={() => setActiveChat(null)}
-            className="md:hidden text-cyan-400 hover:text-cyan-300 transition shrink-0 p-1 mr-0.5"
+            className="md:hidden text-slate-350 hover:text-white transition shrink-0 p-1.5 hover:bg-white/5 rounded-full mr-1 flex items-center justify-center border border-white/5 cursor-pointer"
             title={language === 'ru' ? 'Назад к чатам' : 'Back to chats'}
           >
-            <span className="text-xl leading-none">&larr;</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+            </svg>
           </button>
           
           <div 
@@ -1282,12 +1348,16 @@ export const ChatWindow: React.FC = () => {
                 setIsRightPanelOpen(true);
               }
             }}
-            className="flex items-center gap-2 md:gap-3.5 min-w-0 cursor-pointer hover:opacity-85 transition"
+            className="flex items-center gap-3.5 min-w-0 cursor-pointer hover:opacity-85 transition"
           >
-            <img src={activeChat.photoURL || undefined} alt={activeChat.title} className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover border border-slate-800" />
+            <img 
+              src={activeChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(activeChat.title)}`} 
+              alt={activeChat.title} 
+              className="w-9 h-9 md:w-10 md:h-10 rounded-full object-cover border border-white/10 shadow-sm" 
+            />
             
             <div className="min-w-0">
-              <h3 className="font-semibold text-[13px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
+              <h3 className="font-semibold text-[13.5px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
               {typingUsers.length > 0 ? (
                 <span className="text-[10px] md:text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1 leading-none mt-0.5">
                   <span className="flex gap-0.5">
@@ -1298,20 +1368,51 @@ export const ChatWindow: React.FC = () => {
                   {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
                 </span>
               ) : (
-                <span className="text-[10px] md:text-[11px] text-slate-400 flex items-center gap-1 font-sans mt-0.5 leading-none">
-                  <span className="capitalize text-cyan-500/80 font-medium">
+                <span className="text-[10.5px] md:text-[11.5px] text-slate-400 flex items-center gap-1 font-sans mt-0.5 leading-none">
+                  <span className="capitalize text-cyan-400/90 font-medium">
                     {activeChat.type === 'direct' ? (language === 'ru' ? 'Личный' : 'Direct') : activeChat.type === 'group' ? (language === 'ru' ? 'Группа' : 'Group') : (language === 'ru' ? 'Канал' : 'Channel')}
                   </span> 
                   <span>&bull;</span> 
-                  <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+                  {activeChat.type === 'direct' ? (() => {
+                    const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
+                    const isOnline = partnerId && onlineUsers[partnerId] === 'online';
+                    return (
+                      <span className="flex items-center gap-1 leading-none">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-500'}`} />
+                        <span className={isOnline ? 'text-emerald-450 font-medium' : 'text-slate-400'}>{isOnline ? (language === 'ru' ? 'в сети' : 'online') : (language === 'ru' ? 'не в сети' : 'offline')}</span>
+                      </span>
+                    );
+                  })() : (
+                    <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+                  )}
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Action bar channels */}
+        // Action bar channels
         <div className="flex items-center gap-1.5 md:gap-2">
+          {(() => {
+            const scheduledCount = messages.filter(m => m.chatId === activeChat.id && m.scheduledAt && Date.now() < m.scheduledAt && m.senderId === currentUser?.uid).length;
+            if (scheduledCount > 0) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => setViewScheduledMode(!viewScheduledMode)}
+                  className={`p-1.5 rounded-lg cursor-pointer transition-all relative flex items-center ${viewScheduledMode ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-amber-400 hover:text-amber-300 bg-amber-500/10'}`}
+                  title={language === 'ru' ? 'Отложенные сообщения' : 'Scheduled Messages'}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span className="absolute -top-1 -right-1 bg-amber-500 text-[9px] text-white font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                    {scheduledCount}
+                  </span>
+                </button>
+              );
+            }
+            return null;
+          })()}
+
           <button 
             type="button"
             onClick={() => {
@@ -1380,20 +1481,21 @@ export const ChatWindow: React.FC = () => {
 
       {/* Pinned Msg Banner */}
       {activeChat.pinnedMessageId && (
-        <div className="px-6 py-2 bg-cyan-950/10 border-b border-cyan-800/10 flex justify-between items-center text-xs text-slate-300 select-none animate-fade-in z-10 shrink-0">
-          <div className="flex items-center gap-2 truncate flex-1 min-w-0 mr-3">
-            <Pin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <div className="truncate cursor-pointer text-slate-300 hover:text-white" onClick={() => {
+        <div className="px-4 md:px-6 py-2 bg-white/[0.02] backdrop-blur-md border-b border-white/[0.05] flex justify-between items-center text-xs text-slate-300 select-none animate-fade-in z-10 shrink-0">
+          <div className="flex items-center gap-3 truncate flex-1 min-w-0 mr-3">
+            <div className="w-0.5 h-8 bg-cyan-500 rounded-full shrink-0" />
+            <Pin className="w-3.5 h-3.5 text-cyan-400 rotate-45 shrink-0" />
+            <div className="truncate cursor-pointer" onClick={() => {
               const pinnedDiv = document.getElementById(`msg-${activeChat.pinnedMessageId}`);
               if (pinnedDiv) pinnedDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }}>
-              <span className="font-semibold text-cyan-400 mr-1.5">{language === 'ru' ? 'Закреплённое:' : 'Pinned:'}</span>
-              <span className="text-slate-300 italic truncate text-[11px]">
-                {messages.find(m => m.id === activeChat.pinnedMessageId)?.text || (language === 'ru' ? 'Кликнуть для просмотра' : 'Click to view')}
+              <span className="font-bold text-[10px] text-cyan-400 block tracking-tight uppercase leading-none">{language === 'ru' ? 'Закреплённое сообщение' : 'Pinned Message'}</span>
+              <span className="text-slate-300 truncate block text-[11.5px] mt-0.5">
+                {messages.find(m => m.id === activeChat.pinnedMessageId)?.text || (language === 'ru' ? 'Вложение' : 'Attachment')}
               </span>
             </div>
           </div>
-          <button type="button" onClick={() => pinMessage(activeChat.id, null)} className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer shrink-0">
+          <button type="button" onClick={() => pinMessage(activeChat.id, null)} className="text-slate-500 hover:text-slate-300 p-1.5 hover:bg-white/5 rounded-full cursor-pointer shrink-0 transition">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -1454,20 +1556,49 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
+      {/* Scheduled Mode Banner */}
+      {viewScheduledMode && (
+        <div className="px-6 py-2 bg-amber-950/20 border-b border-amber-500/20 flex justify-between items-center text-xs text-amber-200 select-none animate-fade-in z-10 shrink-0">
+          <div className="flex items-center gap-2 truncate flex-1 min-w-0 mr-3">
+            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+            <span className="font-semibold">{language === 'ru' ? 'Вы просматриваете отложенные сообщения' : 'Viewing Scheduled Messages Queue'}</span>
+          </div>
+          <button type="button" onClick={() => setViewScheduledMode(false)} className="text-amber-500/70 hover:text-amber-300 p-1 cursor-pointer shrink-0 border border-amber-500/10 rounded-lg hover:border-amber-500/30 transition-all font-mono text-[9px] uppercase px-2 tracking-wider">
+            {language === 'ru' ? 'Закрыть' : 'Close'}
+          </button>
+        </div>
+      )}
+
       {/* Message Scrollable Window Stream */}
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative bg-transparent flex flex-col gap-2.5 scroll-smooth custom-scrollbar"
+        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative bg-[#07080b] flex flex-col gap-2.5 scroll-smooth custom-scrollbar z-10"
       >
+        {/* Futuristic Glass Ambient Background Wallpaper Overlay */}
+        <div className="absolute inset-0 z-0 opacity-85 pointer-events-none" style={{
+          backgroundImage: `
+            radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.12), transparent 70%),
+            radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08), transparent 50%),
+            radial-gradient(circle at 90% 10%, rgba(236, 72, 153, 0.05), transparent 40%)
+          `,
+          backgroundAttachment: 'fixed',
+          pointerEvents: 'none'
+        }} />
+        
         {visibleMessages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-650 p-8 text-center select-none max-w-sm mx-auto my-auto py-16">
-            <div className="p-4 rounded-full bg-slate-950 border border-slate-900 text-cyan-500/40 mb-3 animate-pulse">
-              <MessageSquare className="w-7 h-7" />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none max-w-sm mx-auto my-auto py-16 relative z-10">
+            <div className="px-6 py-8 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md shadow-2xl flex flex-col items-center max-w-xs">
+              <div className="p-4 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 mb-4 animate-pulse">
+                <MessageSquare className="w-8 h-8" />
+              </div>
+              <h4 className="text-sm font-bold text-slate-100 tracking-tight mb-2">
+                {language === 'ru' ? 'Здесь пока пусто...' : 'No messages here yet'}
+              </h4>
+              <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                {language === 'ru' ? 'Сообщения зашифрованы и защищены. Начните писать в поле ниже!' : 'All messages are fully encrypted. Start the conversation by sending a direct note below!'}
+              </p>
             </div>
-            <p className="text-xs font-mono lowercase text-slate-550 leading-relaxed">
-              {language === 'ru' ? 'Переписка зашифрована. Начните диалог первым, чтобы сохранить историю.' : t.encryptedSandboxInfo}
-            </p>
           </div>
         ) : (
           (() => {
@@ -1619,7 +1750,7 @@ export const ChatWindow: React.FC = () => {
                   )}
 
                   {/* Message Core Box Stack */}
-                  <div className="flex flex-col gap-0.5 group relative">
+                  <div className={`flex flex-col gap-0.5 group relative ${isMe ? 'items-end' : 'items-start'}`}>
                     {/* Compact sender title display for non-me on starting bundle */}
                     {!isMe && !isConsecutive && (
                       <span className="text-[10px] md:text-[11px] font-bold text-cyan-400 pl-1 mb-0.5 font-sans leading-none">
@@ -1890,6 +2021,19 @@ export const ChatWindow: React.FC = () => {
             </div>
           </div>
         ))}
+
+        {typingUsers.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2.5 mt-1 text-xs text-slate-400 bg-white/[0.03] border border-white/5 rounded-2xl w-fit backdrop-blur-md animate-fade-in-up font-sans relative z-10 select-none">
+            <span className="flex gap-1 items-center h-2">
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </span>
+            <span className="text-[11px] leading-none text-slate-300">
+              {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
+            </span>
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1902,11 +2046,11 @@ export const ChatWindow: React.FC = () => {
           >
             <button
               onClick={() => scrollToBottom(true)}
-              className="bg-slate-800/80 hover:bg-slate-700/90 text-cyan-400 border border-slate-700 p-2.5 rounded-full shadow-xl shadow-black/50 backdrop-blur-md cursor-pointer transition-all active:scale-95"
+              className="bg-white/[0.08] backdrop-blur-md hover:bg-white/[0.12] text-white border border-white/10 p-2.5 rounded-full shadow-xl cursor-pointer transition-all duration-200 active:scale-90 flex items-center justify-center h-10 w-10 relative"
               title="Jump to bottom"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              <svg className="w-5 h-5 text-slate-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 13l-7 7m0 0l-7-7m7 7V3" />
               </svg>
               {initialUnreadId && (
                 <span className="absolute -top-1 -right-1 flex h-3 w-3">
@@ -1943,25 +2087,27 @@ export const ChatWindow: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 mt-3 w-full justify-center">
-              <button 
-                type="button"
-                onClick={cancelVideoRecording}
-                className="px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-450 hover:text-rose-400 text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-all text-center leading-none"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                {language === 'ru' ? 'Отмена' : 'Cancel'}
-              </button>
-              
-              <button 
-                type="button"
-                onClick={stopVideoRecording}
-                className="px-4 py-1.5 rounded-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 text-xs font-extrabold cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/10 transition-all leading-none"
-              >
-                <Send className="w-3.5 h-3.5" />
-                {language === 'ru' ? 'Снять и отправить' : 'Send video note'}
-              </button>
-            </div>
+            {videoRecordingState === 'locked' && (
+              <div className="flex items-center gap-3 mt-3 w-full justify-center">
+                <button 
+                  type="button"
+                  onClick={cancelVideoRecording}
+                  className="px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-450 hover:text-rose-400 text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-all text-center leading-none"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {language === 'ru' ? 'Отмена' : 'Cancel'}
+                </button>
+                
+                <button 
+                  type="button"
+                  onClick={stopVideoRecording}
+                  className="px-4 py-1.5 rounded-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 text-xs font-extrabold cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/10 transition-all leading-none"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {language === 'ru' ? 'Снять и отправить' : 'Send video note'}
+                </button>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -2179,12 +2325,12 @@ export const ChatWindow: React.FC = () => {
                 {/* B. Camera Circular note */}
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
                     setShowAttachmentDropdown(false);
                     if (isRecordingVideo) {
                       stopVideoRecording();
                     } else {
-                      startVideoRecording();
+                      startVideoRecording(e.clientX, e.clientY);
                     }
                   }}
                   className="w-full text-left flex items-center gap-3 px-2.5 py-1.5 hover:bg-white/[0.04] rounded-xl cursor-pointer text-xs font-semibold hover:text-[var(--glass-accent)] transition-all font-sans"
@@ -2242,37 +2388,25 @@ export const ChatWindow: React.FC = () => {
           </AnimatePresence>
 
           {/* Transparent full-screen holding overlay to detect swipes & gestures cleanly */}
-          {(recordingState === 'holding' || isRecordingVideo) && (
+          {(recordingState === 'holding' || videoRecordingState === 'holding') && (
             <div 
               className="fixed inset-0 z-[9999] cursor-grabbing bg-black/10 backdrop-blur-[0.5px] select-none touch-none"
               onMouseMove={(e) => {
                 if (recordingState === 'holding') handleRecordMove(e.clientX, e.clientY);
+                if (videoRecordingState === 'holding') handleVideoRecordMove(e.clientX, e.clientY);
               }}
               onTouchMove={(e) => {
                 const touch = e.touches[0];
                 if (recordingState === 'holding') handleRecordMove(touch.clientX, touch.clientY);
+                if (videoRecordingState === 'holding') handleVideoRecordMove(touch.clientX, touch.clientY);
               }}
               onMouseUp={() => {
                 if (recordingState === 'holding') handleRecordRelease();
-                else if (isRecordingVideo) {
-                    const elapsed = Date.now() - pressStartTimeRef.current;
-                    if (elapsed < 350) {
-                        cancelVideoRecording();
-                        setRecordingMode('voice');
-                    }
-                    else stopVideoRecording();
-                }
+                if (videoRecordingState === 'holding') handleVideoRecordRelease();
               }}
               onTouchEnd={() => {
                 if (recordingState === 'holding') handleRecordRelease();
-                else if (isRecordingVideo) {
-                    const elapsed = Date.now() - pressStartTimeRef.current;
-                    if (elapsed < 350) {
-                        cancelVideoRecording();
-                        setRecordingMode('voice');
-                    }
-                    else stopVideoRecording();
-                }
+                if (videoRecordingState === 'holding') handleVideoRecordRelease();
               }}
             />
           )}
@@ -2449,50 +2583,53 @@ export const ChatWindow: React.FC = () => {
                   </div>
 
                   {/* Gesture Swipe Lock indicator tooltip in holding mode */}
-                  {recordingState === 'holding' && (
-                    <>
-                      <div className="absolute inset-x-0 -top-12 flex justify-center pointer-events-none transition-opacity duration-150 z-50">
-                        <div className={`bg-slate-900/95 text-[10px] border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg backdrop-blur-md transition-all ${
-                          recordGestures.startY - recordGestures.currentY > 30 
-                            ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10 scale-110 font-bold' 
-                            : recordGestures.startX - recordGestures.currentX > 40
-                            ? 'border-rose-500/50 text-rose-400 bg-rose-500/10 scale-110 font-bold'
-                            : 'border-cyan-500/15 text-[var(--glass-accent)]'
-                        }`}>
-                          {recordGestures.startY - recordGestures.currentY > 30 ? (
-                            <>
-                              <Lock className="w-3 h-3" />
-                              <span>{language === 'ru' ? 'Отпустите для фиксации' : 'Release to Lock'}</span>
-                            </>
-                          ) : recordGestures.startX - recordGestures.currentX > 40 ? (
-                            <>
-                              <Trash2 className="w-3 h-3" />
-                              <span>{language === 'ru' ? 'Отпустите для отмены' : 'Release to Cancel'}</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-3 h-3" />
-                              <span>{language === 'ru' ? 'Свайп ⬆️ фиксация / ⬅️ отмена' : 'Swipe ⬆️ to lock / ⬅️ to cancel'}</span>
-                            </>
-                          )}
+                  {(recordingState === 'holding' || videoRecordingState === 'holding') && (() => {
+                    const gestures = recordingState === 'holding' ? recordGestures : videoGestures;
+                    return (
+                      <>
+                        <div className="absolute inset-x-0 -top-12 flex justify-center pointer-events-none transition-opacity duration-150 z-50">
+                          <div className={`bg-slate-900/95 text-[10px] border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg backdrop-blur-md transition-all ${
+                            gestures.startY - gestures.currentY > 30 
+                              ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10 scale-110 font-bold' 
+                              : gestures.startX - gestures.currentX > 40
+                              ? 'border-rose-500/50 text-rose-400 bg-rose-500/10 scale-110 font-bold'
+                              : 'border-cyan-500/15 text-[var(--glass-accent)]'
+                          }`}>
+                            {gestures.startY - gestures.currentY > 30 ? (
+                              <>
+                                <Lock className="w-3 h-3" />
+                                <span>{language === 'ru' ? 'Отпустите для фиксации' : 'Release to Lock'}</span>
+                              </>
+                            ) : gestures.startX - gestures.currentX > 40 ? (
+                              <>
+                                <Trash2 className="w-3 h-3" />
+                                <span>{language === 'ru' ? 'Отпустите для отмены' : 'Release to Cancel'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-3 h-3" />
+                                <span>{language === 'ru' ? 'Свайп ⬆️ фиксация / ⬅️ отмена' : 'Swipe ⬆️ to lock / ⬅️ to cancel'}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      {/* Floating Mic for gesture drag feedback representing the finger */}
-                      <div 
-                        className={`fixed z-[10000] pointer-events-none drop-shadow-[0_0_15px_rgba(6,182,212,0.6)] flex items-center justify-center p-3.5 rounded-full text-white shadow-xl transition-all ${
-                          recordGestures.startX - recordGestures.currentX > 40 ? 'bg-rose-500' : 'bg-[var(--glass-accent)]'
-                        }`}
-                        style={{
-                          left: recordGestures.currentX - 25,
-                          top: recordGestures.currentY - 25,
-                          transform: `scale(${recordGestures.startX - recordGestures.currentX > 40 ? 0.8 : recordGestures.startY - recordGestures.currentY > 30 ? 1.3 : 1.15})`,
-                          opacity: recordGestures.startX - recordGestures.currentX > 40 ? 0.7 : 1
-                        }}
-                      >
-                        <Mic className="w-6 h-6 animate-pulse" />
-                      </div>
-                    </>
-                  )}
+                        {/* Floating Mic for gesture drag feedback representing the finger */}
+                        <div 
+                          className={`fixed z-[10000] pointer-events-none drop-shadow-[0_0_15px_rgba(6,182,212,0.6)] flex items-center justify-center p-3.5 rounded-full text-white shadow-xl transition-all ${
+                            gestures.startX - gestures.currentX > 40 ? 'bg-rose-500' : 'bg-[var(--glass-accent)]'
+                          }`}
+                          style={{
+                            left: gestures.currentX - 25,
+                            top: gestures.currentY - 25,
+                            transform: `scale(${gestures.startX - gestures.currentX > 40 ? 0.8 : gestures.startY - gestures.currentY > 30 ? 1.3 : 1.15})`,
+                            opacity: gestures.startX - gestures.currentX > 40 ? 0.7 : 1
+                          }}
+                        >
+                          {recordingState === 'holding' ? <Mic className="w-6 h-6 animate-pulse" /> : <Video className="w-6 h-6 animate-pulse text-amber-300" />}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
               </>
@@ -2515,24 +2652,56 @@ export const ChatWindow: React.FC = () => {
                     <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
                   </button>
                 ) : inputText.trim() || selectedDraftFile ? (
-                  <button 
-                    type="submit" 
-                    disabled={!inputText.trim() && !selectedDraftFile}
-                    className="relative p-2.5 bg-[var(--glass-accent)] hover:opacity-90 disabled:opacity-30 rounded-full text-white font-bold shadow-lg flex items-center justify-center h-11 w-11 transition-all border border-white/10 cursor-pointer active:scale-95 z-50 before:absolute before:-inset-4 before:content-['']"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
+                  <div className="relative z-50">
+                    <button 
+                      type="submit" 
+                      disabled={!inputText.trim() && !selectedDraftFile}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setShowScheduleDropdown(true);
+                      }}
+                      className="relative p-2.5 bg-[var(--glass-accent)] hover:opacity-90 disabled:opacity-30 rounded-full text-white font-bold shadow-lg flex items-center justify-center h-11 w-11 transition-all border border-white/10 cursor-pointer active:scale-95 before:absolute before:-inset-4 before:content-['']"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                    {showScheduleDropdown && (
+                      <div className="absolute bottom-16 right-0 w-64 bg-slate-900 border border-slate-700 shadow-2xl rounded-xl p-3 z-[100] animate-fade-in-up">
+                        <div className="text-xs font-semibold text-slate-200 mb-2 truncate">
+                          {language === 'ru' ? 'Отправить позже (планирование)' : 'Schedule Message'}
+                        </div>
+                        <input 
+                          type="datetime-local" 
+                          className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-cyan-500 mb-2 text-xs"
+                          min={new Date().toISOString().slice(0, 16)}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              setScheduledTime(new Date(e.target.value).getTime());
+                              setShowScheduleDropdown(false);
+                            }
+                          }}
+                        />
+                        <button 
+                           type="button"
+                           onClick={() => setShowScheduleDropdown(false)}
+                           className="w-full py-1 text-[10px] text-slate-400 hover:text-slate-200 underline text-center"
+                        >
+                           {language === 'ru' ? 'Отмена' : 'Cancel'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
                     onMouseDown={(e) => {
                       e.preventDefault();
                       pressStartTimeRef.current = Date.now();
-                      if (recordingMode === 'voice') {
-                        startRecording(e.clientX, e.clientY);
-                      } else {
-                        startVideoRecording();
-                      }
+                      const x = e.clientX;
+                      const y = e.clientY;
+                      recordingPressTimerRef.current = setTimeout(() => {
+                        if (recordingMode === 'voice') startRecording(x, y);
+                        else startVideoRecording(x, y);
+                      }, 200);
                     }}
                     onTouchStart={(e) => {
                       e.preventDefault();
@@ -2541,11 +2710,12 @@ export const ChatWindow: React.FC = () => {
                       }
                       const touch = e.touches[0];
                       pressStartTimeRef.current = Date.now();
-                      if (recordingMode === 'voice') {
-                        startRecording(touch.clientX, touch.clientY);
-                      } else {
-                        startVideoRecording();
-                      }
+                      const x = touch.clientX;
+                      const y = touch.clientY;
+                      recordingPressTimerRef.current = setTimeout(() => {
+                        if (recordingMode === 'voice') startRecording(x, y);
+                        else startVideoRecording(x, y);
+                      }, 200);
                     }}
                     onTouchMove={(e) => {
                       if (recordingMode === 'voice' && recordingState === 'holding') {
@@ -2555,28 +2725,36 @@ export const ChatWindow: React.FC = () => {
                     }}
                     onMouseUp={() => {
                       const elapsed = Date.now() - pressStartTimeRef.current;
+                      if (elapsed < 200) {
+                        clearTimeout(recordingPressTimerRef.current);
+                        setRecordingMode(prev => prev === 'voice' ? 'video' : 'voice');
+                        return;
+                      }
+                      
                       if (recordingMode === 'voice') {
                         handleRecordRelease();
                       } else {
-                        if (elapsed < 350) {
-                          cancelVideoRecording();
-                          setRecordingMode('voice');
-                        } else {
-                          stopVideoRecording();
-                        }
+                        handleVideoRecordRelease();
                       }
                     }}
                     onTouchEnd={() => {
                       const elapsed = Date.now() - pressStartTimeRef.current;
+                      if (elapsed < 200) {
+                        clearTimeout(recordingPressTimerRef.current);
+                        setRecordingMode(prev => prev === 'voice' ? 'video' : 'voice');
+                        return;
+                      }
+
                       if (recordingMode === 'voice') {
                         handleRecordRelease();
                       } else {
-                        if (elapsed < 350) {
-                          cancelVideoRecording();
-                          setRecordingMode('voice');
-                        } else {
-                          stopVideoRecording();
-                        }
+                        handleVideoRecordRelease();
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      // Safety for mouse dragged away before timeout
+                      if (Date.now() - pressStartTimeRef.current < 200) {
+                        clearTimeout(recordingPressTimerRef.current);
                       }
                     }}
                     className={`relative p-2.5 bg-black/15 border border-white/5 hover:bg-black/25 rounded-full shrink-0 transition-all shadow-md cursor-pointer select-none h-11 w-11 flex items-center justify-center active:scale-95 touch-none z-50 before:absolute before:-inset-4 before:content-[''] ${
@@ -2675,7 +2853,7 @@ export const ChatWindow: React.FC = () => {
                 if (!pollQuestion.trim() || !pollOptionsInput.trim()) return;
                 const opts = pollOptionsInput.split(',').map(s => s.trim()).filter(Boolean);
                 if (opts.length < 2) {
-                  alert(language === 'ru' ? 'Пожалуйста, введите как минимум 2 варианта ответа!' : 'Enter at least 2 distinct options!');
+                  showToast(language === 'ru' ? 'Пожалуйста, введите как минимум 2 варианта ответа!' : 'Enter at least 2 distinct options!', 'error');
                   return;
                 }
                 await sendPollMessage(pollQuestion.trim(), opts, pollIsAnonymous, pollIsMultiple);
@@ -3014,6 +3192,13 @@ export const ChatWindow: React.FC = () => {
           </motion.div>
         ))}
       </AnimatePresence>
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-950/95 border border-cyan-500/35 text-[11.5px] font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 text-slate-100 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none max-w-sm w-[90%]">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400" />
+          <span className="text-center">{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 };

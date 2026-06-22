@@ -366,24 +366,6 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setUserProfile(profileDetails);
           setBlockedUsersList(profileDetails.blockedUsers || []);
 
-          // Sync user to Cloud SQL Postgres database
-          (async () => {
-            try {
-              const idToken = await user.getIdToken();
-              const syncRes = await fetch('/api/users/sync', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${idToken}`
-                }
-              });
-              const syncData = await syncRes.json();
-              logger.info(`Synced user ${user.uid} with Cloud SQL Postgres`, syncData);
-            } catch (err) {
-              logger.error(`Failed to sync user with Cloud SQL Postgres:`, err);
-            }
-          })();
-
           // Safe, non-blocking execution of supplementary presence status & sessions log
           (async () => {
             try {
@@ -1804,32 +1786,37 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!currentUser || !activeChat || !userProfile) return;
 
     const messageId = doc(collection(db, 'messages')).id;
-    const newMessage: Message = {
+    const newMessage: any = {
       id: messageId,
       chatId: activeChat.id,
       senderId: currentUser.uid,
       senderName: userProfile.displayName,
-      senderPhotoURL: userProfile.photoURL,
+      senderPhotoURL: userProfile.photoURL || '',
       text: text.trim(),
       type: 'text',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      replyTo: replyTo ? {
+      reactions: {},
+      readBy: [currentUser.uid],
+      status: 'sending'
+    };
+
+    if (replyTo) {
+      newMessage.replyTo = {
         messageId: replyTo.id,
         text: replyTo.text,
         senderName: replyTo.senderName
-      } : undefined,
-      forwardFrom: forwardFrom ? {
+      };
+    }
+    if (forwardFrom) {
+      newMessage.forwardFrom = {
         senderId: forwardFrom.senderId,
         senderName: forwardFrom.senderName
-      } : undefined,
-      reactions: {},
-      readBy: [currentUser.uid],
-      status: 'sending',
-      topicId,
-      silent,
-      scheduledAt
-    };
+      };
+    }
+    if (topicId) newMessage.topicId = topicId;
+    if (silent) newMessage.silent = silent;
+    if (scheduledAt) newMessage.scheduledAt = scheduledAt;
 
     try {
       // 1. Submit content to Firestore (local cache will immediately trigger onSnapshot)
@@ -1901,7 +1888,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           chatId: activeChat.id,
           senderId: currentUser.uid,
           senderName: userProfile.displayName,
-          senderPhotoURL: userProfile.photoURL,
+          senderPhotoURL: userProfile.photoURL || '',
           text: `Attachment File: ${file.name}`,
           type: type,
           fileUrl: url,
@@ -1963,7 +1950,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       chatId: activeChat.id,
       senderId: currentUser.uid,
       senderName: userProfile.displayName,
-      senderPhotoURL: userProfile.photoURL,
+      senderPhotoURL: userProfile.photoURL || '',
       text: '🎙️ Voice Message',
       type: 'voice',
       fileUrl: audioUrl,
@@ -2010,7 +1997,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       chatId: activeChat.id,
       senderId: currentUser.uid,
       senderName: userProfile.displayName,
-      senderPhotoURL: userProfile.photoURL,
+      senderPhotoURL: userProfile.photoURL || '',
       text: '🎨 Sticker',
       type: 'sticker',
       fileUrl: stickerUrl,
@@ -2174,23 +2161,25 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!currentUser || !activeChat || !userProfile) return;
     const messageId = doc(collection(db, 'messages')).id;
     const pollOptions = options.map(opt => ({ text: opt, votes: [] }));
-    const newMessage: Message = {
+    const pollObj: any = {
+      question,
+      options: pollOptions,
+      isAnonymous,
+      isMultiple,
+      closed: false
+    };
+    if (isQuiz !== undefined) pollObj.isQuiz = isQuiz;
+    if (correctOptionIndex !== undefined) pollObj.correctOptionIndex = correctOptionIndex;
+
+    const newMessage: any = {
       id: messageId,
       chatId: activeChat.id,
       senderId: currentUser.uid,
       senderName: userProfile.displayName,
-      senderPhotoURL: userProfile.photoURL,
+      senderPhotoURL: userProfile.photoURL || '',
       text: `📊 ${question}`,
       type: 'poll',
-      poll: {
-        question,
-        options: pollOptions,
-        isAnonymous,
-        isMultiple,
-        isQuiz,
-        correctOptionIndex,
-        closed: false
-      },
+      poll: pollObj,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       reactions: {},
@@ -2406,7 +2395,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: callId,
       callerId: currentUser.uid,
       callerName: userProfile.displayName,
-      callerPhotoURL: userProfile.photoURL,
+      callerPhotoURL: userProfile.photoURL || '',
       receiverId: receiverId,
       receiverName: rData?.displayName || 'Contact',
       receiverPhotoURL: rData?.photoURL || '',

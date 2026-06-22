@@ -65,9 +65,9 @@ service cloud.firestore {
         && data.displayName is string && data.displayName.size() <= 100
         && data.username is string && data.username.size() <= 50
         && data.email is string && data.email.size() <= 150
-        && (data.bio == null || (data.bio is string && data.bio.size() <= 4000))
-        && (data.statusMessage == null || (data.statusMessage is string && data.statusMessage.size() <= 1000))
-        && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 2048));
+        && (!data.keys().hasAny(['bio']) || data.bio == null || (data.bio is string && data.bio.size() <= 4000))
+        && (!data.keys().hasAny(['statusMessage']) || data.statusMessage == null || (data.statusMessage is string && data.statusMessage.size() <= 1000))
+        && (!data.keys().hasAny(['photoURL']) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 2048));
     }
     
     function isValidChat(data) {
@@ -175,10 +175,10 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(chatId) && (
         // Creator/Admins can edit properties (except immutables like creatorId)
         (isChatAdmin(chatId, request.auth.uid) && !incoming().diff(existing()).affectedKeys().hasAny(['creatorId'])) ||
-        // Regular members can join/leave or modify personal fields (like pin status, archived, mute, drafts)
+        // Regular members can join/leave or modify personal fields (like pin status, archived, mute, drafts, and update lastMessage on send)
         (existing().members.hasAny([request.auth.uid]) && incoming().diff(existing()).affectedKeys().hasOnly([
-          'pinnedIds', 'archivedIds', 'muteIds', 'unreadCounts', 'typing', 'drafts', 'editingDrafts'
-        ])) ||
+          'pinnedIds', 'archivedIds', 'muteIds', 'unreadCounts', 'typing', 'drafts', 'editingDrafts', 'lastMessage', 'updatedAt', 'members'
+        ]) && (!incoming().diff(existing()).affectedKeys().hasAny(['members']) || existing().members.size() >= incoming().members.size())) ||
         // Joining a public chat or private via valid requests/invites
         (!existing().members.hasAny([request.auth.uid]) && incoming().members.hasAny([request.auth.uid]) && (
           existing().type == 'public' || 
@@ -237,7 +237,10 @@ service cloud.firestore {
       );
       
       match /signalData/{signalId} {
-        allow read, write: if isSignedIn(); 
+        allow read, write: if isSignedIn() && (
+          get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid || 
+          get(/databases/$(database)/documents/calls/$(callId)).data.receiverId == request.auth.uid
+        );
       }
     }
 
