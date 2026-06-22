@@ -71,7 +71,11 @@ export const Sidebar: React.FC = () => {
     onlineUsers,
     uploadAvatar,
     deleteAvatar,
-    joinChatByInviteCode
+    joinChatByInviteCode,
+    terminateOtherSessions,
+    resolveReport,
+    globalReports,
+    globalAuditLogs
   } = useMessenger();
 
   const { t, language, setLanguage } = useLanguage();
@@ -119,7 +123,7 @@ export const Sidebar: React.FC = () => {
   const [privacyOnline, setPrivacyOnline] = useState<'all' | 'contacts' | 'nobody'>(userProfile?.privacySettings?.onlineStatus || 'all');
   
   // Settings Tab and Device/UX-specific preference states
-  const [settingsTab, setSettingsTab] = useState<'account' | 'chats' | 'notifications' | 'privacy' | 'data'>('account');
+  const [settingsTab, setSettingsTab] = useState<'account' | 'chats' | 'notifications' | 'privacy' | 'data' | 'admin'>('account');
   const [textSizeSelection, setTextSizeSelection] = useState<string>(() => localStorage.getItem('vi-chat-text-size') || 'sm');
   const [wallpaperSelection, setWallpaperSelection] = useState<string>(() => localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => localStorage.getItem('vi-sound-notifications') !== 'false');
@@ -1233,18 +1237,19 @@ export const Sidebar: React.FC = () => {
             </button>
           </div>
           {/* Category Tabs Switcher */}
-          <div className="flex border-b border-white/5 bg-white/[0.02] text-[10px] uppercase font-bold tracking-wider font-mono">
+          <div className="flex border-b border-white/5 bg-white/[0.02] text-[10px] uppercase font-bold tracking-wider font-mono overflow-x-auto shrink-0 scrollbar-none">
             {[
               { id: 'account', label: language === 'ru' ? 'Аккаунт' : 'Account' },
               { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats' },
               { id: 'notifications', label: language === 'ru' ? 'Увед.' : 'Notif.' },
               { id: 'privacy', label: language === 'ru' ? 'Приват.' : 'Privacy' },
-              { id: 'data', label: language === 'ru' ? 'Данные' : 'Data' }
+              { id: 'data', label: language === 'ru' ? 'Данные' : 'Data' },
+              ...(currentUser?.email === 'sasamihajlov709@gmail.com' ? [{ id: 'admin', label: language === 'ru' ? 'Админ' : 'Admin' }] : [])
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setSettingsTab(tab.id as any)}
-                className={`flex-1 py-3 text-center border-b-2 transition cursor-pointer ${settingsTab === tab.id ? 'border-[var(--glass-accent)] text-[var(--glass-accent)] bg-white/[0.03]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                className={`px-3 py-3 text-center border-b-2 transition cursor-pointer shrink-0 ${settingsTab === tab.id ? 'border-[var(--glass-accent)] text-[var(--glass-accent)] bg-white/[0.03]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
               >
                 {tab.label}
               </button>
@@ -1603,6 +1608,47 @@ export const Sidebar: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Active Sessions Manager (Zero-Trust Compliance) */}
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5">
+                  <div className="flex justify-between items-center">
+                    <span className="block text-xs font-mono text-amber-500 uppercase tracking-wider font-bold">
+                      {language === 'ru' ? 'Активные Сессии' : 'Active Sessions'}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        terminateOtherSessions().then(() => {
+                          alert(language === 'ru' ? 'Все другие сессии успешно завершены!' : 'All other device sessions revoked!');
+                        });
+                      }}
+                      className="text-[9px] uppercase font-mono px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded hover:bg-amber-500/25 text-amber-300 cursor-pointer transition active:scale-95"
+                    >
+                      {language === 'ru' ? 'Выйти на других' : 'Terminate Others'}
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-xs divide-y divide-white/5 max-h-[140px] overflow-y-auto pr-1">
+                    {(userProfile?.activeSessions || []).map((session, idx) => {
+                      const isCurrent = navigator.userAgent.substring(0, 30) === session.deviceName.substring(0, 30);
+                      return (
+                        <div key={session.id || idx} className="pt-1.5 first:pt-0 flex justify-between items-start gap-1">
+                          <div className="space-y-0.5">
+                            <span className="font-mono text-[10px] text-slate-200 block truncate max-w-[180px]">
+                              {session.deviceName}
+                            </span>
+                            <span className="text-[9px] text-slate-500 block font-mono">
+                              Active: {new Date(session.lastActive || Date.now()).toLocaleString()}
+                            </span>
+                          </div>
+                          {isCurrent ? (
+                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/20 border border-emerald-500/15 px-1 rounded uppercase">Current</span>
+                          ) : (
+                            <span className="text-[9px] font-mono text-slate-400 bg-slate-900/40 border border-slate-800 px-1 rounded">Offline</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="p-3.5 bg-rose-950/10 rounded-2xl border border-rose-500/10 space-y-2">
                   <span className="block text-xs font-mono text-rose-400 uppercase tracking-wider">{language === 'ru' ? 'Опасная зона' : 'Dangerous Zone'}</span>
                   <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
@@ -1620,6 +1666,107 @@ export const Sidebar: React.FC = () => {
                   >
                     {language === 'ru' ? 'Очистить кэш приложения' : 'Clear Application Cache'}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'admin' && currentUser?.email === 'sasamihajlov709@gmail.com' && (
+              <div className="space-y-4">
+                {/* Reports Panel */}
+                <div className="p-3.5 bg-black/20 rounded-2xl border border-rose-500/10 space-y-3 font-sans">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span className="block text-xs font-mono text-rose-400 uppercase tracking-wider font-bold">
+                      {language === 'ru' ? 'Жалобы пользователей' : 'Pending Abuse Reports'} ({globalReports?.length || 0})
+                    </span>
+                  </div>
+                  
+                  {(!globalReports || globalReports.length === 0) ? (
+                    <p className="text-[10px] text-slate-500 italic py-2">
+                      {language === 'ru' ? 'Жалоб на нарушения политик не обнаружено.' : 'No pending abuse complaints in queue.'}
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                      {globalReports.map((r) => (
+                        <div key={r.id} className="p-2.5 bg-rose-950/10 border border-rose-500/15 rounded-xl space-y-1.5 hover:bg-rose-950/20 transition text-[10px]">
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <span className="text-rose-300 font-bold block truncate max-w-[170px]">
+                                Target: {r.reportedUserId}
+                              </span>
+                              <span className="text-slate-400 font-mono text-[9px] block">
+                                Complainant: {r.reporterId}
+                              </span>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                resolveReport(r.id).then(() => {
+                                  alert(language === 'ru' ? 'Жалоба успешно решена!' : 'Abuse report marked as resolved.');
+                                });
+                              }}
+                              className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[8px] font-mono hover:bg-emerald-500/25 rounded cursor-pointer transition active:scale-95 text-xs font-bold"
+                            >
+                              Resolve
+                            </button>
+                          </div>
+                          <p className="text-slate-300 leading-relaxed border-l-2 border-rose-500/30 pl-2 whitespace-pre-wrap py-0.5">
+                            {r.reason}
+                          </p>
+                          <span className="text-[8px] text-slate-500 block font-mono">
+                            Logged: {new Date(r.createdAt || Date.now()).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Audit Logs System Trail */}
+                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5 font-sans">
+                  <div className="flex items-center justify-between">
+                    <span className="block text-xs font-mono text-cyan-400 uppercase tracking-wider font-bold">
+                      {language === 'ru' ? 'Журнал Аудита' : 'System Security Logs'} ({globalAuditLogs?.length || 0})
+                    </span>
+                    <span className="text-[8px] text-slate-500 font-mono tracking-wider animate-pulse">● LIVE SYNC</span>
+                  </div>
+                  
+                  {(!globalAuditLogs || globalAuditLogs.length === 0) ? (
+                    <p className="text-[10px] text-slate-500 italic py-2">
+                      {language === 'ru' ? 'Записи аудита не найдены.' : 'Audit logs stream is empty.'}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 font-mono text-[9px] divide-y divide-white/5">
+                      {globalAuditLogs.map((log, idx) => {
+                        let badgeColor = 'text-cyan-400 bg-cyan-950/20 border-cyan-500/10';
+                        if (log.action?.includes('ban') || log.action?.includes('kick') || log.action?.includes('delete')) {
+                          badgeColor = 'text-rose-400 bg-rose-950/20 border-rose-500/10';
+                        } else if (log.action?.includes('role')) {
+                          badgeColor = 'text-amber-400 bg-amber-950/20 border-amber-500/10';
+                        } else if (log.action?.includes('login')) {
+                          badgeColor = 'text-emerald-400 bg-emerald-950/20 border-emerald-500/10';
+                        }
+                        
+                        return (
+                          <div key={log.id || idx} className="pt-1.5 first:pt-0 pb-0.5 leading-snug">
+                            <div className="flex justify-between items-center mb-0.5">
+                              <span className={`text-[8px] uppercase tracking-wider px-1 rounded border ${badgeColor} font-bold`}>
+                                {log.action || 'system_event'}
+                              </span>
+                              <span className="text-slate-500 text-[8px] shrink-0 font-sans">
+                                {new Date(log.timestamp || Date.now()).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <span className="text-slate-300 font-sans block leading-tight text-xs">
+                              {log.details || 'No event details specified.'}
+                            </span>
+                            <span className="text-slate-500 text-[8px] block mt-0.5 font-mono">
+                              Actor: {log.actorName || 'Authorized User'} ({log.actorId ? log.actorId.substring(0, 6) : 'Sys'})
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

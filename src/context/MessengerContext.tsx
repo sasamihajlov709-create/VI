@@ -51,7 +51,8 @@ import {
   ActiveSession,
   CustomInviteLink,
   JoinRequest,
-  AdminAction
+  AdminAction,
+  ReportItem
 } from '../types';
 
 interface MessengerContextType {
@@ -177,7 +178,7 @@ interface MessengerContextType {
   submitJoinRequest: (chatId: string, reason?: string) => Promise<void>;
   handleJoinRequest: (requestId: string, action: 'approved' | 'rejected') => Promise<void>;
   terminateOtherSessions: () => Promise<void>;
-  submitReport: (reportedUserId: string, chatId?: string, messageId?: string, reason: string) => Promise<void>;
+  submitReport: (reportedUserId: string, reason: string, chatId?: string, messageId?: string) => Promise<void>;
   resolveReport: (reportId: string) => Promise<void>;
   writeAuditLog: (action: string, details: string, chatId?: string, targetId?: string) => Promise<void>;
   globalReports: ReportItem[];
@@ -961,10 +962,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  const submitReport = async (reportedUserId: string, chatId?: string, messageId?: string, reason: string) => {
+  const submitReport = async (reportedUserId: string, reason: string, chatId?: string, messageId?: string) => {
     if (!currentUser) throw new Error('Not authenticated');
+    const reportId = doc(collection(db, 'reports')).id;
     try {
-      const reportId = doc(collection(db, 'reports')).id;
       const newReport = {
         id: reportId,
         reporterId: currentUser.uid,
