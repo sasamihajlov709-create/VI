@@ -296,7 +296,7 @@ export const CallScreen: React.FC = () => {
           <div className="flex flex-col items-center text-center gap-4 animate-bounce">
             <div className="relative">
               <img 
-                src={ongoingCall.callerId === currentUser?.uid ? ongoingCall.receiverPhotoURL : ongoingCall.callerPhotoURL} 
+                src={(ongoingCall.callerId === currentUser?.uid ? ongoingCall.receiverPhotoURL : ongoingCall.callerPhotoURL) || undefined} 
                 alt="" 
                 className="w-24 h-24 rounded-full border-4 border-cyan-400 object-cover shadow-2xl shadow-cyan-400/10" 
               />
@@ -339,7 +339,7 @@ export const CallScreen: React.FC = () => {
             {(ongoingCall.type === 'voice' || isCameraOff) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 z-10 gap-3">
                 <img 
-                  src={ongoingCall.callerId === currentUser?.uid ? ongoingCall.receiverPhotoURL : ongoingCall.callerPhotoURL} 
+                  src={(ongoingCall.callerId === currentUser?.uid ? ongoingCall.receiverPhotoURL : ongoingCall.callerPhotoURL) || undefined} 
                   alt="" 
                   className="w-20 h-20 rounded-full object-cover border-2 border-slate-700" 
                 />

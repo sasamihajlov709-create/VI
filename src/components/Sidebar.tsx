@@ -601,7 +601,7 @@ export const Sidebar: React.FC = () => {
               }}
               className="flex items-center gap-3 p-3 hover:bg-[var(--glass-item-active)] cursor-pointer transition-all"
             >
-              <img src={user.photoURL} alt={user.displayName} className="w-9 h-9 rounded-full object-cover border border-white/10" />
+              <img src={user.photoURL || undefined} alt={user.displayName} className="w-9 h-9 rounded-full object-cover border border-white/10" />
               <div>
                 <div className="text-sm font-medium text-[var(--glass-text)]">{user.displayName}</div>
                 <div className="text-xs text-[var(--glass-text-muted)]">@{user.username}</div>
@@ -687,7 +687,7 @@ export const Sidebar: React.FC = () => {
             >
               <div className="w-12 h-12 rounded-full p-[2px] bg-gradient-to-tr from-cyan-400 to-sky-500 shadow-md transform active:scale-95 transition-all">
                 <img 
-                  src={payload.user.photoURL} 
+                  src={payload.user.photoURL || undefined} 
                   alt={payload.user.displayName} 
                   className="w-full h-full rounded-full object-cover bg-slate-950 border-2 border-[#0c1626]" 
                 />
@@ -1174,7 +1174,7 @@ export const Sidebar: React.FC = () => {
                           }}
                           className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent" 
                         />
-                        <img src={c.photoURL} alt={c.displayName} className="w-6 h-6 rounded-full" />
+                        <img src={c.photoURL || undefined} alt={c.displayName} className="w-6 h-6 rounded-full" />
                         <span className="font-medium text-[var(--glass-text)]">{c.displayName}</span>
                       </label>
                     ))
@@ -1409,7 +1409,7 @@ export const Sidebar: React.FC = () => {
                             }}
                             className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent cursor-pointer" 
                           />
-                          <img src={c.photoURL} alt={c.title} className="w-6 h-6 rounded-full inline-block border border-white/5 shrink-0" />
+                          <img src={c.photoURL || undefined} alt={c.title} className="w-6 h-6 rounded-full inline-block border border-white/5 shrink-0" />
                           <span className="font-medium text-slate-200 max-w-[200px] truncate">{c.title}</span>
                         </label>
                       ))}
@@ -1477,7 +1477,7 @@ export const Sidebar: React.FC = () => {
                 {/* Visual Header */}
                 <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5 relative">
                   <div className="relative group w-20 h-20">
-                    <img src={userProfile?.photoURL} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
+                    <img src={userProfile?.photoURL || undefined} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
                     <label className="absolute inset-0 bg-black/55 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-1">
                       <span className="text-[9px] font-bold text-white uppercase">{language === 'ru' ? 'Изменить' : 'Change'}</span>
                       <input 
@@ -2026,7 +2026,7 @@ export const Sidebar: React.FC = () => {
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col justify-between p-4 z-50">
           <div className="flex justify-between items-center max-w-lg mx-auto w-full text-slate-200 pb-2 border-b border-slate-800/60">
             <div className="flex items-center gap-3">
-              <img src={activeStoryView.photoURL} alt={activeStoryView.displayName} className="w-10 h-10 rounded-full" />
+              <img src={activeStoryView.photoURL || undefined} alt={activeStoryView.displayName} className="w-10 h-10 rounded-full" />
               <div>
                 <span className="font-semibold text-sm">{activeStoryView.displayName}</span>
                 <span className="block text-[10px] text-slate-400">Visible for 24 Hours</span>
@@ -2042,9 +2042,9 @@ export const Sidebar: React.FC = () => {
             {storiesByUser[activeStoryView.uid].list.map((story, i) => (
               <div key={story.id} className="relative w-full max-h-[75vh] rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center">
                 {story.mediaType === 'video' ? (
-                  <video src={story.mediaUrl} controls autoPlay className="max-w-full max-h-full" />
+                  <video src={story.mediaUrl || undefined} controls autoPlay className="max-w-full max-h-full" />
                 ) : (
-                  <img src={story.mediaUrl} alt="" className="max-w-full max-h-full object-contain" />
+                  <img src={story.mediaUrl || undefined} alt="" className="max-w-full max-h-full object-contain" />
                 )}
                 {/* Floating Heart Reaction bar shortcut */}
                 <div className="absolute bottom-5 left-1/2 transform -translate-x-1/2 flex items-center gap-3.5 bg-slate-950/60 backdrop-blur px-5 py-2.5 rounded-full border border-slate-800 shadow">

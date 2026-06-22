@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
@@ -58,6 +58,7 @@ import {
 interface MessengerContextType {
   currentUser: FirebaseUser | null;
   userProfile: UserProfile | null;
+  isAuthInitialized: boolean;
   chats: Chat[];
   messages: Message[];
   activeChat: Chat | null;
@@ -223,28 +224,49 @@ const playWebAudioNotification = () => {
   }
 };
 
-export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export function useMessengerAuthState() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isAuthInitialized, setIsAuthInitialized] = useState<boolean>(false);
+  return { currentUser, setCurrentUser, userProfile, setUserProfile, isAuthInitialized, setIsAuthInitialized };
+}
+
+export function useMessengerChatState() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeChat, setActiveChatState] = useState<Chat | null>(null);
+  const [activeFolder, setActiveFolder] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  return { chats, setChats, messages, setMessages, activeChat, setActiveChatState, activeFolder, setActiveFolder, searchQuery, setSearchQuery };
+}
+
+export function useMessengerMediaState() {
   const [stories, setStories] = useState<Story[]>([]);
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [dialerCall, setDialerCall] = useState<CallSession | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ [msgId: string]: number }>({});
+  return { stories, setStories, activeCall, setActiveCall, dialerCall, setDialerCall, uploadProgress, setUploadProgress };
+}
+
+export function useMessengerUIState() {
   const [blockedUsersList, setBlockedUsersList] = useState<string[]>([]);
   const [contactsList, setContactsList] = useState<UserProfile[]>([]);
   const [globalUsers, setGlobalUsers] = useState<UserProfile[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<{ [uid: string]: 'online' | 'offline' }>({});
-  const [activeFolder, setActiveFolder] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(false);
-  const [uploadProgress, setUploadProgress] = useState<{ [msgId: string]: number }>({});
   const [selectedUserProfile, setSelectedUserProfile] = useState<UserProfile | null>(null);
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('app-theme') || 'theme-dark-glass');
   const [globalReports, setGlobalReports] = useState<ReportItem[]>([]);
   const [globalAuditLogs, setGlobalAuditLogs] = useState<any[]>([]);
+  return { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs };
+}
+
+export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { currentUser, setCurrentUser, userProfile, setUserProfile, isAuthInitialized, setIsAuthInitialized } = useMessengerAuthState();
+  const { chats, setChats, messages, setMessages, activeChat, setActiveChatState, activeFolder, setActiveFolder, searchQuery, setSearchQuery } = useMessengerChatState();
+  const { stories, setStories, activeCall, setActiveCall, dialerCall, setDialerCall, uploadProgress, setUploadProgress } = useMessengerMediaState();
+  const { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs } = useMessengerUIState();
 
   const setTheme = async (t: string) => {
     setThemeState(t);
@@ -492,6 +514,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setDialerCall(null);
         setContactsList([]);
       }
+      setIsAuthInitialized(true);
     });
 
     return () => {
@@ -643,7 +666,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const foundChat = chats.find(c => c.id === targetChatId);
         if (foundChat) {
           setActiveChatState(foundChat);
-        } else if (chats.length > 0) {
+        } else {
           // Attempt direct fetch from Firestore if it hasn't propagated to preloaded state or is deep-linked
           const chatDocRef = doc(db, 'chats', targetChatId);
           getDoc(chatDocRef).then((snap) => {
@@ -665,6 +688,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }).catch((err: any) => {
             logger.error("Direct fetch of chat document failed", { error: err.message });
           });
+        }
+      } else {
+        if (activeChatRef.current) {
+          setActiveChatState(null);
         }
       }
     };
@@ -898,6 +925,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
     await signOut(auth);
+    window.history.pushState(null, '', '/');
   };
 
   const updateMyProfile = async (
@@ -2366,7 +2394,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Calling Signaling State Dispatch
   const initiateCall = async (receiverId: string, type: 'voice' | 'video') => {
-    if (!currentUser || !userProfile) return;
+    if (!currentUser || !userProfile || !receiverId) return;
     
     const callId = doc(collection(db, 'calls')).id;
 
@@ -2423,9 +2451,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   return (
-    <MessengerContext.Provider value={{
+    <MessengerContext.Provider value={useMemo(() => ({
+
       currentUser,
       userProfile,
+      isAuthInitialized,
       chats,
       messages,
       activeChat,
@@ -2528,7 +2558,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       writeAuditLog,
       globalReports,
       globalAuditLogs
-    }}>
+      }), [currentUser, userProfile, isAuthInitialized, chats, messages, activeChat, stories, activeCall, dialerCall, blockedUsersList, contactsList, globalUsers, onlineUsers, activeFolder, searchQuery, isSidebarOpen, isRightPanelOpen, uploadProgress, theme, selectedUserProfile, globalReports, globalAuditLogs])}>
       {children}
     </MessengerContext.Provider>
   );

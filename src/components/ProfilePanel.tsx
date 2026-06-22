@@ -581,7 +581,7 @@ export const ProfilePanel: React.FC = () => {
                             onClick={() => setSelectedUserProfile(user)}
                             className="flex items-center gap-2 min-w-0 cursor-pointer hover:opacity-85"
                           >
-                            <img src={user.photoURL} alt={user.displayName} className="w-6.5 h-6.5 rounded-full object-cover shrink-0 border border-white/5" />
+                            <img src={user.photoURL || undefined} alt={user.displayName} className="w-6.5 h-6.5 rounded-full object-cover shrink-0 border border-white/5" />
                             <div className="min-w-0">
                               <span className="font-medium text-slate-200 truncate block hover:underline">{user.displayName}</span>
                               <span className="text-[9.5px] text-slate-400 font-mono block">@{user.username}</span>
@@ -926,7 +926,7 @@ export const ProfilePanel: React.FC = () => {
                       {pendingRequests.map((req) => (
                         <div key={req.id} className="pt-2 text-[11px] space-y-1.5">
                           <div className="flex items-center gap-2">
-                            <img src={req.userPhotoURL} alt="User Avatar" className="w-5 h-5 rounded-full object-cover shrink-0" />
+                            <img src={req.userPhotoURL || undefined} alt="User Avatar" className="w-5 h-5 rounded-full object-cover shrink-0" />
                             <span className="font-semibold text-slate-200 truncate">{req.userDisplayName}</span>
                           </div>
                           {req.reason && <p className="text-[10px] text-slate-400 leading-relaxed italic">" {req.reason} "</p>}

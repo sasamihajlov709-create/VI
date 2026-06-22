@@ -8,9 +8,6 @@ const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/src/main.tsx',
-  '/src/index.css',
-  '/src/App.tsx',
   'https://img.icons8.com/color/192/speech-bubble.png'
 ];
 

@@ -37,6 +37,25 @@ export function useVoiceRecorder(
     }
   }, [voicePreviewBlob]);
 
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.onstop = null;
+          mediaRecorderRef.current.stop();
+        } catch (e) {}
+      }
+    };
+  }, []);
+
   const resetRecordingState = useCallback(() => {
     setIsRecording(false);
     setRecordDuration(0);

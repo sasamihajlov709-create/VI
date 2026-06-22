@@ -27,6 +27,7 @@ const MessengerContent: React.FC = () => {
   const { 
     currentUser, 
     userProfile, 
+    isAuthInitialized,
     activeChat, 
     isRightPanelOpen, 
     setIsRightPanelOpen,
@@ -53,14 +54,13 @@ const MessengerContent: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState('');
 
   const [isLocalStorageOffline, setIsLocalStorageOffline] = useState(!navigator.onLine);
-  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     
     const handleViewportResize = () => {
       if (window.visualViewport) {
-        setViewportHeight(window.visualViewport.height);
+        document.documentElement.style.setProperty('--app-height', `${window.visualViewport.height}px`);
       }
     };
 
@@ -68,6 +68,8 @@ const MessengerContent: React.FC = () => {
       window.visualViewport.addEventListener('resize', handleViewportResize);
       window.visualViewport.addEventListener('scroll', handleViewportResize);
       handleViewportResize();
+    } else {
+      document.documentElement.style.setProperty('--app-height', '100dvh');
     }
 
     return () => {
@@ -136,9 +138,9 @@ const MessengerContent: React.FC = () => {
   };
 
   // 1. Initial bootloader state
-  if (currentUser !== null && !userProfile) {
+  if (!isAuthInitialized || (currentUser !== null && !userProfile)) {
     return (
-      <div className="fixed inset-0 bg-[#0A0A0A] flex flex-col items-center justify-center text-slate-450 select-none">
+      <div className={`fixed inset-0 bg-[#0A0A0A] flex flex-col items-center justify-center text-slate-450 select-none ${theme}`}>
         <RefreshCw className="w-8 h-8 animate-spin text-cyan-500 mb-2" />
         <span className="text-sm font-mono tracking-widest text-[11px] uppercase">{t.retrievingSession}</span>
       </div>
@@ -154,7 +156,7 @@ const MessengerContent: React.FC = () => {
     return (
       <div 
         className={`flex w-screen text-slate-100 overflow-hidden relative font-sans ${theme}`}
-        style={{ height: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+        style={{ height: 'var(--app-height, 100dvh)' }}
       >
         {/* Offline connection status bar */}
         {isLocalStorageOffline && (
@@ -189,7 +191,7 @@ const MessengerContent: React.FC = () => {
   return (
     <div 
       className={`w-screen flex items-center justify-center p-4 relative overflow-hidden font-sans select-none ${theme}`}
-      style={{ minHeight: viewportHeight ? `${viewportHeight}px` : '100dvh' }}
+      style={{ height: 'var(--app-height, 100dvh)' }}
     >
       {/* Floating Language Swapper in login */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5 glass-panel px-3 py-1.5 rounded-full shadow-lg">

@@ -240,7 +240,7 @@ const CircularVideoNote: React.FC<{ src: string }> = ({ src }) => {
     <div className="relative w-40 h-40 md:w-44 md:h-44 rounded-full overflow-hidden border-2 border-cyan-500/30 bg-black cursor-pointer shadow-lg mx-auto md:mx-0 my-1 group-all shrink-0">
       <video 
         ref={videoRef}
-        src={src} 
+        src={src || undefined} 
         loop 
         muted={muted} 
         playsInline 
@@ -356,7 +356,7 @@ const AudioWavePlayer: React.FC<{ src: string, duration?: number }> = ({ src, du
 
   return (
     <div className="flex items-center gap-2.5 p-2 px-3 bg-black/20 hover:bg-black/35 rounded-2xl border border-white/5 max-w-xs my-1 select-none backdrop-blur-sm shadow-md">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} src={src || undefined} preload="metadata" />
       
       {/* Play/Pause Button */}
       <button 
@@ -412,8 +412,10 @@ const AudioWavePlayer: React.FC<{ src: string, duration?: number }> = ({ src, du
 };
 
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { useVisualViewport } from '../hooks/useVisualViewport';
 
 export const ChatWindow: React.FC = () => {
+  const { height: viewportHeight, offset: viewportOffset } = useVisualViewport();
   const { 
     currentUser, 
     userProfile,
@@ -1176,7 +1178,7 @@ export const ChatWindow: React.FC = () => {
                         className="flex items-center justify-between p-2 rounded-xl bg-black/25 hover:bg-white/5 border border-white/5 hover:border-cyan-500/10 transition-all cursor-pointer group"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <img src={u.photoURL} alt={u.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0" />
+                          <img src={u.photoURL || undefined} alt={u.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0" />
                           <div className="min-w-0">
                             <h4 className="text-xs font-bold text-slate-200 truncate group-hover:text-[var(--glass-accent)]">{u.displayName}</h4>
                             <p className="text-[10px] font-mono text-slate-500 truncate">@{u.username}</p>
@@ -1225,7 +1227,8 @@ export const ChatWindow: React.FC = () => {
 
   return (
     <div 
-      className="flex-1 bg-[#090909] flex flex-col h-full relative overflow-hidden"
+      className="flex-1 bg-[#090909] flex flex-col relative overflow-hidden"
+      style={{ height: viewportHeight > 0 ? viewportHeight : '100%' }}
       onDragEnter={handleDrag}
       onClick={(e) => {
         // If clicking outside an active menu, close it
@@ -1281,7 +1284,7 @@ export const ChatWindow: React.FC = () => {
             }}
             className="flex items-center gap-2 md:gap-3.5 min-w-0 cursor-pointer hover:opacity-85 transition"
           >
-            <img src={activeChat.photoURL} alt={activeChat.title} className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover border border-slate-800" />
+            <img src={activeChat.photoURL || undefined} alt={activeChat.title} className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover border border-slate-800" />
             
             <div className="min-w-0">
               <h3 className="font-semibold text-[13px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
@@ -1608,7 +1611,7 @@ export const ChatWindow: React.FC = () => {
                       className={`w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0 ${!isConsecutive ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                     >
                       {!isConsecutive ? (
-                        <img src={msg.senderPhotoURL} alt={msg.senderName} className="w-full h-full object-cover border border-slate-900 shadow" />
+                        <img src={msg.senderPhotoURL || undefined} alt={msg.senderName} className="w-full h-full object-cover border border-slate-900 shadow" />
                       ) : (
                         <div className="w-full h-full" />
                       )}
@@ -1675,7 +1678,7 @@ export const ChatWindow: React.FC = () => {
                       {msg.type === 'sticker' && (
                         <div className="relative select-none max-w-[130px] p-0 mb-0.5">
                           <img 
-                            src={msg.fileUrl} 
+                            src={msg.fileUrl || undefined} 
                             alt="Sticker asset file" 
                             className="w-28 h-28 object-contain hover:scale-105 transition-all duration-300 cursor-pointer" 
                           />
@@ -1687,7 +1690,7 @@ export const ChatWindow: React.FC = () => {
                           className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs border border-slate-900/60 bg-black/55 cursor-pointer hover:opacity-95 transition"
                           onClick={() => setSelectedImage(msg.fileUrl || null)}
                         >
-                          <img src={msg.fileUrl} alt="Visual content upload" className="w-full h-auto object-cover max-h-[220px]" />
+                          <img src={msg.fileUrl || undefined} alt="Visual content upload" className="w-full h-auto object-cover max-h-[220px]" />
                         </div>
                       )}
 
@@ -1699,7 +1702,7 @@ export const ChatWindow: React.FC = () => {
                           }
                           return (
                             <div className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs bg-black">
-                              <video src={msg.fileUrl} controls className="w-full h-auto" />
+                              <video src={msg.fileUrl || undefined} controls className="w-full h-auto" />
                             </div>
                           );
                         })()
@@ -2076,7 +2079,7 @@ export const ChatWindow: React.FC = () => {
                           }}
                           className="p-1 hover:bg-slate-900 hover:scale-115 rounded-xl transition duration-300 flex items-center justify-center cursor-pointer relative bg-slate-950/20"
                         >
-                          <img src={stickUrl} alt="Sticker illustration" className="w-12 h-12 object-contain" />
+                          <img src={stickUrl || undefined} alt="Sticker illustration" className="w-12 h-12 object-contain" />
                         </button>
                       ))}
                     </div>
@@ -2119,7 +2122,7 @@ export const ChatWindow: React.FC = () => {
                           }}
                           className="p-1 hover:bg-slate-900 hover:scale-115 rounded-xl transition duration-300 flex items-center justify-center cursor-pointer relative bg-slate-950/20"
                         >
-                          <img src={stickUrl} alt="Custom user sticker" className="w-12 h-12 object-contain" />
+                          <img src={stickUrl || undefined} alt="Custom user sticker" className="w-12 h-12 object-contain" />
                         </button>
                       ))}
 
@@ -2774,7 +2777,7 @@ export const ChatWindow: React.FC = () => {
               <div className="flex flex-col items-center px-6 -mt-12 pb-6 relative">
                 <div className="relative pointer-events-none">
                   <img 
-                    src={selectedUserProfile.photoURL} 
+                    src={selectedUserProfile.photoURL || undefined} 
                     alt={selectedUserProfile.displayName} 
                     className="w-24 h-24 rounded-full border-4 border-slate-950/40 object-cover shadow-2xl relative bg-slate-950" 
                   />

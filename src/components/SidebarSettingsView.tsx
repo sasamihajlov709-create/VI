@@ -332,12 +332,6 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
   const [bgConnection, setBgConnection] = useState<boolean>(() => customSettings.keepAliveBackground ?? true);
   const [retryNotif, setRetryNotif] = useState<boolean>(() => customSettings.retryNotificationsRelay ?? true);
 
-  // Exclusions counts mock state
-  const [exceptPrivate, setExceptPrivate] = useState<number>(9);
-  const [exceptGroups, setExceptGroups] = useState<number>(11);
-  const [exceptChannels, setExceptChannels] = useState<number>(7);
-  const [exceptStories, setExceptStories] = useState<number>(20);
-
   // Chat parameters
   const [textSize, setTextSize] = useState<string>(() => localStorage.getItem('vi-chat-text-size') || 'sm');
   const [wallpaper, setWallpaper] = useState<string>(() => localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
@@ -1009,35 +1003,14 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
               
               <div className="space-y-3 text-xs">
                 {[
-                  { key: 'notifyPrivate', val: notifPrivate, setter: setNotifPrivate, label: t.privateChats, exc: exceptPrivate, excSet: setExceptPrivate },
-                  { key: 'notifyGroups', val: notifGroups, setter: setNotifGroups, label: t.notifGroups, exc: exceptGroups, excSet: setExceptGroups },
-                  { key: 'notifyChannels', val: notifChannels, setter: setNotifChannels, label: t.notifChannels, exc: exceptChannels, excSet: setExceptChannels },
-                  { key: 'notifyStories', val: notifStories, setter: setNotifStories, label: t.notifStories, exc: exceptStories, excSet: setExceptStories }
+                  { key: 'notifyPrivate', val: notifPrivate, setter: setNotifPrivate, label: t.privateChats },
+                  { key: 'notifyGroups', val: notifGroups, setter: setNotifGroups, label: t.notifGroups },
+                  { key: 'notifyChannels', val: notifChannels, setter: setNotifChannels, label: t.notifChannels },
+                  { key: 'notifyStories', val: notifStories, setter: setNotifStories, label: t.notifStories }
                 ].map((chn) => (
                   <div key={chn.key} className="flex justify-between items-start gap-2.5 border-b border-white/[0.02] pb-2 last:border-0 last:pb-0">
                     <div className="min-w-0 flex-1">
                       <span className="text-slate-200 font-semibold block leading-none">{chn.label}</span>
-                      
-                      {/* Exclusion controls with increment/decrement */}
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <span className="text-[9px] font-mono text-slate-500 uppercase">
-                          {t.exceptionsSuffix.replace('{count}', String(chn.exc))}
-                        </span>
-                        <div className="flex items-center bg-black/35 rounded border border-white/5 px-1 gap-1">
-                          <button 
-                            onClick={() => chn.excSet(Math.max(0, chn.exc - 1))}
-                            className="text-slate-500 hover:text-cyan-400 font-mono text-[9px] px-1 hover:bg-white/5 rounded transition cursor-pointer"
-                          >
-                            -
-                          </button>
-                          <button 
-                            onClick={() => chn.excSet(chn.exc + 1)}
-                            className="text-slate-500 hover:text-cyan-400 font-mono text-[9px] px-1 hover:bg-white/5 rounded transition cursor-pointer"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
                     </div>
                     
                     <input 
