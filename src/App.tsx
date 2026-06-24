@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { MessengerProvider, useMessenger } from './context/MessengerContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { Sidebar } from './components/Sidebar';
@@ -155,9 +155,15 @@ const MessengerContent: React.FC = () => {
 
     return (
       <div 
-        className={`flex w-screen text-slate-100 overflow-hidden relative font-sans ${theme}`}
+        className={`flex w-screen text-[var(--glass-text)] overflow-hidden relative font-sans ${theme}`}
         style={{ height: 'var(--app-height, 100dvh)' }}
       >
+        {/* Background Ambient Glows (VisionOS Depth) */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 opacity-40">
+           <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] ambient-aurora-glow-1 blur-[120px]" />
+           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] ambient-aurora-glow-2 blur-[120px]" />
+        </div>
+
         {/* Offline connection status bar */}
         {isLocalStorageOffline && (
           <div className="absolute top-0 inset-x-0 bg-red-650/90 text-white py-1 px-4 text-center text-xs font-mono tracking-wider flex items-center justify-center gap-2 z-50 shadow">
@@ -174,11 +180,34 @@ const MessengerContent: React.FC = () => {
           <ChatWindow />
 
           {/* 3. Details right column metadata (Toggleable desktop drawer) */}
-          {activeChat && isRightPanelOpen && (
-            <div className="hidden lg:block shrink-0">
-              <ProfilePanel />
-            </div>
-          )}
+          <AnimatePresence>
+            {activeChat && isRightPanelOpen && (
+              <>
+                {/* Mobile Overlay Background */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsRightPanelOpen(false)}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] lg:hidden"
+                />
+
+                {/* The Panel itself (desktop is sliding column, mobile is sliding drawer) */}
+                <motion.div 
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: window.innerWidth >= 1024 ? 320 : '85vw', opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                  className="fixed right-0 top-0 bottom-0 z-[210] lg:static lg:z-auto lg:shrink-0 overflow-hidden border-l border-white/5 bg-[#0a0f1a] lg:bg-transparent shadow-2xl lg:shadow-none flex flex-col"
+                  style={{ maxWidth: '320px' }}
+                >
+                  <div className="w-full h-full min-w-[280px]">
+                    <ProfilePanel />
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Floating WebRTC Ringing overlays */}

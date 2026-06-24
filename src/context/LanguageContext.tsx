@@ -60,8 +60,8 @@ export interface Translations {
 
 const translations: Record<Language, Translations> = {
   en: {
-    appName: "VI Messenger Node",
-    loginSubtitle: "Connect to highly-secure, unified WebRTC peer calls and real-time community boards.",
+    appName: "Messenger",
+    loginSubtitle: "Fast. Secure. Powerful.",
     retrievingSession: "Retrieving credential session...",
     offlineBanner: "OFFLINE PERSISTENCE ENABLED - READING LOCAL INDEXEDDB CACHE",
     profileSettings: "My Profile settings",
@@ -115,8 +115,8 @@ const translations: Record<Language, Translations> = {
     noCustomStickers: "Drag-drop or select an image to upload custom stickers!"
   },
   ru: {
-    appName: "VI Messenger Node",
-    loginSubtitle: "Подключайтесь к высокозащищенным пиринговым WebRTC звонкам и доскам сообществ в реальном времени.",
+    appName: "Мессенджер",
+    loginSubtitle: "Быстро. Безопасно. Мощно.",
     retrievingSession: "Получение сессии учетных данных...",
     offlineBanner: "РЕЖИМ ОФЛАЙН-ХРАНИЛИЩА - ЧТЕНИЕ ИЗ ЛОКАЛЬНОГО КЭША INDEXEDDB",
     profileSettings: "Настройки моего профиля",

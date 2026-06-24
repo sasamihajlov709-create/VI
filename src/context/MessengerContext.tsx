@@ -38,6 +38,7 @@ import {
 import { 
   ref as storageRef, 
   uploadBytesResumable, 
+  uploadBytes,
   getDownloadURL 
 } from 'firebase/storage';
 import { auth, db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -74,6 +75,8 @@ interface MessengerContextType {
   isSidebarOpen: boolean;
   isRightPanelOpen: boolean;
   uploadProgress: { [msgId: string]: number };
+  forwardingMessage: Message | null;
+  setForwardingMessage: (msg: Message | null) => void;
   
   // Auth actions
   loginEmail: (email: string, pass: string) => Promise<void>;
@@ -121,7 +124,7 @@ interface MessengerContextType {
   deleteFolder: (folderId: string) => Promise<void>;
   
   // Message actions
-  sendTextMessage: (text: string, replyTo?: Message, forwardFrom?: Message, topicId?: string, silent?: boolean, scheduledAt?: number) => Promise<void>;
+  sendTextMessage: (text: string, replyTo?: Message, forwardFrom?: Message, topicId?: string, silent?: boolean, scheduledAt?: number, targetChatId?: string) => Promise<void>;
   sendFileMessage: (file: File, type: 'image' | 'video' | 'file') => Promise<void>;
   sendVoiceMessage: (audioBlob: Blob, durationSeconds: number) => Promise<void>;
   sendStickerMessage: (stickerUrl: string) => Promise<void>;
@@ -266,11 +269,13 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const { currentUser, setCurrentUser, userProfile, setUserProfile, isAuthInitialized, setIsAuthInitialized } = useMessengerAuthState();
   const { chats, setChats, messages, setMessages, activeChat, setActiveChatState, activeFolder, setActiveFolder, searchQuery, setSearchQuery } = useMessengerChatState();
   const { stories, setStories, activeCall, setActiveCall, dialerCall, setDialerCall, uploadProgress, setUploadProgress } = useMessengerMediaState();
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs } = useMessengerUIState();
 
   const setTheme = async (t: string) => {
     setThemeState(t);
     localStorage.setItem('app-theme', t);
+    window.dispatchEvent(new Event('vi-settings-changed'));
     if (currentUser) {
       try {
         await updateDoc(doc(db, 'users', currentUser.uid), { theme: t });
@@ -542,7 +547,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Real-time Chat List synchronizations
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !userProfile) return;
 
     // Listen to chats where current user is listed as a member OR are public/channels
     const chatsQuery = query(
@@ -550,12 +555,39 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       where('members', 'array-contains', currentUser.uid)
     );
 
-    const unsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+    const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
       const chatsData: Chat[] = [];
       snapshot.docs.forEach((doc) => {
         const chat = doc.data() as Chat;
         chatsData.push({ ...chat, id: doc.id });
       });
+
+      // Automatically pre-install Favorites (Saved Messages) if it does not exist
+      const hasFavorites = chatsData.some(
+        c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser.uid
+      );
+      if (!hasFavorites) {
+        try {
+          const newChatId = doc(collection(db, 'chats')).id;
+          const language = localStorage.getItem('vi_messenger_lang') || 'ru';
+          const newChat: Chat = {
+            id: newChatId,
+            type: 'direct',
+            title: language === 'ru' ? 'Избранное' : 'Saved Messages',
+            photoURL: '',
+            members: [currentUser.uid],
+            admins: [currentUser.uid],
+            creatorId: currentUser.uid,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            unreadCounts: { [currentUser.uid]: 0 },
+            pinnedIds: [currentUser.uid]
+          };
+          await setDoc(doc(db, 'chats', newChatId), newChat);
+        } catch (err) {
+          console.error("Failed to auto-provision Favorites chat:", err);
+        }
+      }
 
       // Show notifications for background chats
       snapshot.docChanges().forEach((change) => {
@@ -593,8 +625,15 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       });
       
-      // Sort chats by updatedAt descending
-      chatsData.sort((a, b) => b.updatedAt - a.updatedAt);
+      // Sort chats: pinned chats first, then sorted by updatedAt descending
+      chatsData.sort((a, b) => {
+        const aPinned = a.pinnedIds?.includes(currentUser.uid) ? 1 : 0;
+        const bPinned = b.pinnedIds?.includes(currentUser.uid) ? 1 : 0;
+        if (aPinned !== bPinned) {
+          return bPinned - aPinned;
+        }
+        return b.updatedAt - a.updatedAt;
+      });
       setChats(chatsData);
 
       // Auto-mark received background messages as 'delivered' using Firestore updates
@@ -620,7 +659,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [currentUser, userProfile]);
 
   // Synchronize URL query/hash parameter with activeChat state
   useEffect(() => {
@@ -1174,7 +1213,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const existing = chats.find(c => 
       c.type === 'direct' && 
       (isSelf 
-        ? c.members.length === 1 && c.members[0] === currentUser.uid
+        ? [...new Set(c.members)].length === 1 && c.members[0] === currentUser.uid
         : c.members.length === 2 && c.members.includes(currentUser.uid) && c.members.includes(targetUser.uid)
       )
     );
@@ -1200,7 +1239,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unreadCounts: isSelf ? { [currentUser.uid]: 0 } : {
         [currentUser.uid]: 0,
         [targetUser.uid]: 0
-      }
+      },
+      pinnedIds: isSelf ? [currentUser.uid] : []
     };
 
     await setDoc(doc(db, 'chats', newChatId), newChat);
@@ -1215,7 +1255,10 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     rules?: string,
     welcomeMessage?: string
   ): Promise<Chat> => {
-    if (!currentUser || !userProfile) throw new Error('Not authenticated');
+    if (!currentUser || !userProfile) {
+        console.error('CreateGroup failed: Not authenticated');
+        throw new Error('Not authenticated');
+    }
 
     const newChatId = doc(collection(db, 'chats')).id;
     const allMembers = [currentUser.uid, ...memberIds];
@@ -1239,7 +1282,14 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       welcomeMessage: welcomeMessage || `Welcome to ${title}!`
     };
 
-    await setDoc(doc(db, 'chats', newChatId), newGroupChat);
+    console.log('Attempting to create group chat with:', newGroupChat);
+
+    try {
+        await setDoc(doc(db, 'chats', newChatId), newGroupChat);
+    } catch (e) {
+        console.error('CreateGroup failed: SetDoc error', e);
+        throw e;
+    }
     
     // Auto-create initial system notification message
     const msgId = doc(collection(db, 'messages')).id;
@@ -1313,6 +1363,11 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const deleteChat = async (chatId: string) => {
     if (!currentUser) return;
+    const targetChat = chats.find(c => c.id === chatId);
+    if (targetChat && targetChat.type === 'direct' && targetChat.members.length === 1 && targetChat.members[0] === currentUser.uid) {
+      console.warn("Attempt to delete Favorites/Saved Messages chat blocked.");
+      return;
+    }
     await updateDoc(doc(db, 'chats', chatId), {
       members: arrayRemove(currentUser.uid)
     });
@@ -1782,13 +1837,14 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Realtime Messages sending functions with resilient offline states
-  const sendTextMessage = async (text: string, replyTo?: Message, forwardFrom?: Message, topicId?: string, silent?: boolean, scheduledAt?: number) => {
-    if (!currentUser || !activeChat || !userProfile) return;
+  const sendTextMessage = async (text: string, replyTo?: Message, forwardFrom?: Message, topicId?: string, silent?: boolean, scheduledAt?: number, targetChatId?: string) => {
+    const finalChatId = targetChatId || activeChat?.id;
+    if (!currentUser || !finalChatId || !userProfile) return;
 
     const messageId = doc(collection(db, 'messages')).id;
     const newMessage: any = {
       id: messageId,
-      chatId: activeChat.id,
+      chatId: finalChatId,
       senderId: currentUser.uid,
       senderName: userProfile.displayName,
       senderPhotoURL: userProfile.photoURL || '',
@@ -1827,25 +1883,28 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // 2. Update Chat's last message metrics
       if (!scheduledAt || scheduledAt <= Date.now()) {
+        const currentChat = chats.find(c => c.id === finalChatId) || activeChat;
         const increments: { [key: string]: any } = {};
-        activeChat.members.forEach((uid) => {
-          if (uid !== currentUser.uid) {
-            increments[`unreadCounts.${uid}`] = increment(1);
-          }
-        });
+        if (currentChat) {
+          currentChat.members.forEach((uid) => {
+            if (uid !== currentUser.uid) {
+              increments[`unreadCounts.${uid}`] = increment(1);
+            }
+          });
 
-        await updateDoc(doc(db, 'chats', activeChat.id), {
-          lastMessage: {
-            id: messageId,
-            text: text.trim(),
-            senderId: currentUser.uid,
-            senderName: userProfile.displayName,
-            timestamp: Date.now(),
-            status: 'sent'
-          },
-          updatedAt: Date.now(),
-          ...increments
-        });
+          await updateDoc(doc(db, 'chats', finalChatId), {
+            lastMessage: {
+              id: messageId,
+              text: text.trim(),
+              senderId: currentUser.uid,
+              senderName: userProfile.displayName,
+              timestamp: Date.now(),
+              status: 'sent'
+            },
+            updatedAt: Date.now(),
+            ...increments
+          });
+        }
       }
     } catch (e: any) {
       logger.warn("Initial direct message failed. Retrying transparently with local persistent storage offline queue.", { error: e.message });
@@ -1867,22 +1926,16 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     
     const uploadTask = uploadBytesResumable(storageTargetRef, file);
 
-    uploadTask.on('state_changed', 
-      (snapshot) => {
-        const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        setUploadProgress(prev => ({ ...prev, [messageId]: progress }));
-      }, 
-      (error) => {
-        console.error("Resumable upload failed completely:", error);
-        setUploadProgress(prev => {
-          const u = { ...prev };
-          delete u[messageId];
-          return u;
+    const startFallback = async () => {
+      try {
+        console.warn("Firebase Storage upload failed, falling back to base64 encoding for attachment:", file.name);
+        const base64Url = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
         });
-      }, 
-      async () => {
-        const url = await getDownloadURL(uploadTask.snapshot.ref);
-        
+
         const fileMessage: Message = {
           id: messageId,
           chatId: activeChat.id,
@@ -1891,7 +1944,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           senderPhotoURL: userProfile.photoURL || '',
           text: `Attachment File: ${file.name}`,
           type: type,
-          fileUrl: url,
+          fileUrl: base64Url,
           fileName: file.name,
           fileSize: file.size,
           createdAt: Date.now(),
@@ -1924,13 +1977,81 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           updatedAt: Date.now(),
           ...increments
         });
-
-        // Resolve status progress clean
+      } catch (fallbackErr) {
+        console.error("Base64 upload fallback failed completely:", fallbackErr);
+      } finally {
         setUploadProgress(prev => {
           const u = { ...prev };
           delete u[messageId];
           return u;
         });
+      }
+    };
+
+    uploadTask.on('state_changed', 
+      (snapshot) => {
+        const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        setUploadProgress(prev => ({ ...prev, [messageId]: progress }));
+      }, 
+      (error) => {
+        console.error("Resumable upload failed completely, initiating base64 fallback:", error);
+        startFallback();
+      }, 
+      async () => {
+        try {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          
+          const fileMessage: Message = {
+            id: messageId,
+            chatId: activeChat.id,
+            senderId: currentUser.uid,
+            senderName: userProfile.displayName,
+            senderPhotoURL: userProfile.photoURL || '',
+            text: `Attachment File: ${file.name}`,
+            type: type,
+            fileUrl: url,
+            fileName: file.name,
+            fileSize: file.size,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            reactions: {},
+            readBy: [currentUser.uid],
+            status: 'sent'
+          };
+
+          // Write file record
+          await setDoc(doc(db, 'messages', messageId), fileMessage);
+
+          // Update last message overview
+          const increments: { [key: string]: any } = {};
+          activeChat.members.forEach((uid) => {
+            if (uid !== currentUser.uid) {
+              increments[`unreadCounts.${uid}`] = increment(1);
+            }
+          });
+
+          await updateDoc(doc(db, 'chats', activeChat.id), {
+            lastMessage: {
+              id: messageId,
+              text: `[${type.toUpperCase()}] ${file.name}`,
+              senderId: currentUser.uid,
+              senderName: userProfile.displayName,
+              timestamp: Date.now(),
+              status: 'sent'
+            },
+            updatedAt: Date.now(),
+            ...increments
+          });
+        } catch (err) {
+          console.error("Error finalizing storage file record creation, trying fallback:", err);
+          await startFallback();
+        } finally {
+          setUploadProgress(prev => {
+            const u = { ...prev };
+            delete u[messageId];
+            return u;
+          });
+        }
       }
     );
   };
@@ -1939,11 +2060,22 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!currentUser || !activeChat || !userProfile) return;
 
     const messageId = doc(collection(db, 'messages')).id;
-    const filePath = `chats/${activeChat.id}/voices/${messageId}.ogg`;
+    const filePath = `chats/${activeChat.id}/voices/${messageId}.webm`;
     const storageTargetRef = storageRef(storage, filePath);
 
-    await uploadBytesResumable(storageTargetRef, audioBlob);
-    const audioUrl = await getDownloadURL(storageTargetRef);
+    let audioUrl = '';
+    try {
+      await uploadBytes(storageTargetRef, audioBlob, { contentType: audioBlob.type });
+      audioUrl = await getDownloadURL(storageTargetRef);
+    } catch (storageErr) {
+      console.warn("Voice message Firebase Storage upload failed, falling back to base64 encoding:", storageErr);
+      audioUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
+      });
+    }
 
     const voiceMessage: Message = {
       id: messageId,
@@ -1954,7 +2086,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       text: '🎙️ Voice Message',
       type: 'voice',
       fileUrl: audioUrl,
-      fileName: 'Voice_Note.ogg',
+      fileName: 'Voice_Note.webm',
       duration: parseFloat(durationSeconds.toFixed(1)),
       fileSize: audioBlob.size,
       createdAt: Date.now(),
@@ -2109,7 +2241,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!currentUser || !userProfile) throw new Error('Not authenticated');
 
     // Make sure 'Saved Messages' self-chat exists
-    let savedChat = chats.find(c => c.type === 'direct' && c.members.length === 1 && c.members[0] === currentUser.uid);
+    let savedChat = chats.find(c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser.uid);
     if (!savedChat) {
        savedChat = await createDirectChat(userProfile);
     }
@@ -2134,6 +2266,18 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
 
     await setDoc(doc(db, 'messages', newMsgId), copiedMsg);
+
+    await updateDoc(doc(db, 'chats', savedChat.id), {
+      lastMessage: {
+        id: newMsgId,
+        text: copiedMsg.text || '📎 Forwarded Attachment',
+        senderId: currentUser.uid,
+        senderName: userProfile.displayName,
+        timestamp: Date.now(),
+        status: 'read'
+      },
+      updatedAt: Date.now()
+    });
   };
 
   const addMessageReaction = async (messageId: string, emoji: string) => {
@@ -2460,6 +2604,8 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       isSidebarOpen,
       isRightPanelOpen,
       uploadProgress,
+      forwardingMessage,
+      setForwardingMessage,
       
       loginEmail,
       signupEmail,
@@ -2547,7 +2693,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       writeAuditLog,
       globalReports,
       globalAuditLogs
-      }), [currentUser, userProfile, isAuthInitialized, chats, messages, activeChat, stories, activeCall, dialerCall, blockedUsersList, contactsList, globalUsers, onlineUsers, activeFolder, searchQuery, isSidebarOpen, isRightPanelOpen, uploadProgress, theme, selectedUserProfile, globalReports, globalAuditLogs])}>
+      }), [currentUser, userProfile, isAuthInitialized, chats, messages, activeChat, stories, activeCall, dialerCall, blockedUsersList, contactsList, globalUsers, onlineUsers, activeFolder, searchQuery, isSidebarOpen, isRightPanelOpen, uploadProgress, theme, selectedUserProfile, globalReports, globalAuditLogs, forwardingMessage])}>
       {children}
     </MessengerContext.Provider>
   );

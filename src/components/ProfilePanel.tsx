@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { 
   X, 
@@ -34,6 +34,7 @@ import {
   Unlock
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
+import { useLanguage } from '../context/LanguageContext';
 import { doc, updateDoc, arrayRemove, arrayUnion, query, collection, where, getDocs, setDoc, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { logger } from '../lib/logger';
@@ -66,9 +67,32 @@ export const ProfilePanel: React.FC = () => {
     setIsRightPanelOpen
   } = useMessenger();
 
+  const { language } = useLanguage();
+
   // States
   const [activeTab, setActiveTab] = useState<'info' | 'media' | 'admin'>('info');
+  const [mediaSubTab, setMediaSubTab] = useState<'media' | 'files' | 'links'>('media');
   const [chatMembersDetails, setChatMembersDetails] = useState<UserProfile[]>([]);
+  const { messages } = useMessenger();
+
+  const sharedMedia = useMemo(() => {
+    return messages.filter(m => m.type === 'image' || m.type === 'video' || (m.type === 'file' && m.fileName?.match(/\.(jpe?g|png|gif|webp|mp4|webm)$/i)));
+  }, [messages]);
+
+  const sharedFiles = useMemo(() => {
+    return messages.filter(m => m.type === 'file' && !m.fileName?.match(/\.(jpe?g|png|gif|webp|mp4|webm)$/i));
+  }, [messages]);
+
+  const sharedLinks = useMemo(() => {
+    const linkRegex = /(https?:\/\/[^\s]+)/g;
+    return messages.filter(m => m.type === 'text' && m.text.match(linkRegex))
+      .map(m => ({ 
+        id: m.id, 
+        links: m.text.match(linkRegex) || [], 
+        senderName: m.senderName, 
+        createdAt: m.createdAt 
+      }));
+  }, [messages]);
   const [reportReason, setReportReason] = useState('');
   const [reportSuccess, setReportSuccess] = useState(false);
 
@@ -274,35 +298,40 @@ export const ProfilePanel: React.FC = () => {
   const directTargetUser = chatMembersDetails.find(u => u.uid !== currentUser?.uid);
 
   return (
-    <div className="w-full md:w-[320px] border-l border-white/5 flex flex-col h-full shrink-0 animate-fade-in-up glass-panel" style={{ background: 'var(--glass-sidebar-bg)' }}>
+    <div className="w-full h-full flex flex-col backdrop-blur-3xl bg-[var(--glass-bg)] shadow-[0_0_50px_var(--glass-shadow)] border-l border-[var(--glass-border)] relative z-40 overflow-hidden">
       {/* Drawer title header */}
-      <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
-        <span className="font-semibold text-xs uppercase tracking-wider text-slate-400 font-mono">Chat Attributes</span>
-        <button onClick={() => setIsRightPanelOpen(false)} className="text-slate-500 hover:text-slate-200 cursor-pointer">
-          <X className="w-4 h-4" />
+      <div className="p-5 md:p-6 flex justify-between items-center backdrop-blur-2xl bg-white/[0.03] border-b border-white/[0.08] relative z-20">
+        <div className="flex flex-col">
+          <span className="font-bold text-[14px] md:text-[16px] text-slate-100 tracking-tight">{isDirect ? (language === 'ru' ? 'Профиль контакта' : 'Contact Profile') : (language === 'ru' ? 'Свойства чата' : 'Chat Attributes')}</span>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-mono font-bold">{isDirect ? 'DIRECT NODE' : activeChat.type.toUpperCase() + ' SPACE'}</span>
+        </div>
+        <button onClick={() => setIsRightPanelOpen(false)} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer border border-white/10">
+          <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Tabs list toggle */}
-      <div className="flex border-b border-white/5 text-xs font-medium text-slate-400 bg-white/[0.01]">
-        <button 
-          onClick={() => setActiveTab('info')}
-          className={`flex-1 py-3 text-center transition cursor-pointer ${activeTab === 'info' ? 'text-[var(--glass-accent)] border-b border-[var(--glass-accent)] font-semibold' : 'hover:bg-white/5'}`}
-        >
-          Meta
-        </button>
-        <button 
-          onClick={() => setActiveTab('media')}
-          className={`flex-1 py-3 text-center transition cursor-pointer ${activeTab === 'media' ? 'text-[var(--glass-accent)] border-b border-[var(--glass-accent)] font-semibold' : 'hover:bg-white/5'}`}
-        >
-          Vault
-        </button>
-        <button 
-          onClick={() => setActiveTab('admin')}
-          className={`flex-1 py-3 text-center transition cursor-pointer ${activeTab === 'admin' ? 'text-[var(--glass-accent)] border-b border-[var(--glass-accent)] font-semibold' : 'hover:bg-white/5'}`}
-        >
-          Ops Controls
-        </button>
+      {/* Tabs list toggle - Pilled approach */}
+      <div className="p-3">
+        <div className="flex p-1 bg-black/20 backdrop-blur-md rounded-[24px] border border-white/10 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          <button 
+            onClick={() => setActiveTab('info')}
+            className={`flex-1 py-2.5 rounded-[20px] transition-all duration-300 cursor-pointer ${activeTab === 'info' ? 'bg-white/10 text-white shadow-lg border border-white/20' : 'hover:text-slate-300 hover:bg-white/5'}`}
+          >
+            {language === 'ru' ? 'Инфо' : 'Meta'}
+          </button>
+          <button 
+            onClick={() => setActiveTab('media')}
+            className={`flex-1 py-2.5 rounded-[20px] transition-all duration-300 cursor-pointer ${activeTab === 'media' ? 'bg-white/10 text-white shadow-lg border border-white/20' : 'hover:text-slate-300 hover:bg-white/5'}`}
+          >
+            {language === 'ru' ? 'Медиа' : 'Vault'}
+          </button>
+          <button 
+            onClick={() => setActiveTab('admin')}
+            className={`flex-1 py-2.5 rounded-[20px] transition-all duration-300 cursor-pointer ${activeTab === 'admin' ? 'bg-white/10 text-white shadow-lg border border-white/20' : 'hover:text-slate-300 hover:bg-white/5'}`}
+          >
+            {language === 'ru' ? 'Опции' : 'Controls'}
+          </button>
+        </div>
       </div>
 
       {/* Tab Contents */}
@@ -335,12 +364,12 @@ export const ProfilePanel: React.FC = () => {
             )}
 
             {/* General info description details */}
-            <div className="bg-black/10 p-3.5 rounded-xl border border-white/5 text-slate-400 space-y-1.5">
-              <span className="text-[10px] font-mono uppercase text-[var(--glass-accent)] block tracking-wider mb-1">Rules & Directives</span>
-              <p className="leading-relaxed whitespace-pre-wrap">{activeChat.rules || 'This community has default behavior policies enabled.'}</p>
+            <div className="bg-black/10 p-4 rounded-xl border border-white/5 text-slate-400 space-y-1.5">
+              <span className="text-[10px] font-bold uppercase text-[var(--glass-accent)] block tracking-wider mb-1">{language === 'ru' ? 'Информация' : 'Info'}</span>
+              <p className="leading-relaxed whitespace-pre-wrap">{activeChat.rules || (language === 'ru' ? 'Описание отсутствует.' : 'No description provided.')}</p>
               {activeChat.welcomeMessage && (
                 <>
-                  <span className="text-[10px] font-mono uppercase text-[var(--glass-accent)] block tracking-wider mt-3">Welcome Prompt</span>
+                  <span className="text-[10px] font-bold uppercase text-[var(--glass-accent)] block tracking-wider mt-3">{language === 'ru' ? 'Описание' : 'Description'}</span>
                   <p className="italic">{activeChat.welcomeMessage}</p>
                 </>
               )}
@@ -350,29 +379,28 @@ export const ProfilePanel: React.FC = () => {
             {!isDirect && (
               <div className="space-y-4">
                 {/* Invite link snippet */}
-                <div className="p-3.5 bg-cyan-950/20 border border-cyan-500/10 rounded-xl space-y-2">
+                <div className="p-4 bg-cyan-950/20 border border-cyan-500/10 rounded-xl space-y-2">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-mono uppercase text-cyan-400 block tracking-wider font-semibold">GROUP INVITATION CODES</span>
+                    <span className="text-[10px] font-bold uppercase text-cyan-400 block tracking-wider">{language === 'ru' ? 'ССЫЛКИ ДЛЯ ПРИГЛАШЕНИЯ' : 'INVITE LINKS'}</span>
                   </div>
                   
                   {/* Default code */}
                   <div className="space-y-1.5">
-                    <span className="text-[9px] text-slate-500 font-mono uppercase block">Primary Access Code:</span>
+                    <span className="text-[9px] text-slate-500 uppercase block">{language === 'ru' ? 'Основная ссылка:' : 'Primary Link:'}</span>
                     <div className="flex items-center justify-between gap-1 text-xs">
                       <input 
                         type="text" 
                         readOnly 
                         value={`invite_${activeChat.id}`} 
-                        className="bg-black/35 text-slate-300 font-mono text-[11.5px] border border-white/5 rounded-lg px-2.5 py-1.5 select-all flex-1 min-w-0" 
+                        className="bg-black/35 text-slate-300 font-sans text-[12px] border border-white/5 rounded-lg px-2.5 py-1.5 select-all flex-1 min-w-0" 
                       />
                       <button 
                         onClick={() => {
                           navigator.clipboard.writeText(`invite_${activeChat.id}`);
-                          alert('GROUP INVITATION CODE copied to clipboard!');
                         }}
-                        className="px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-300 font-mono border border-cyan-500/20 text-[10px] rounded-lg transition active:scale-95 cursor-pointer uppercase font-semibold shrink-0"
+                        className="px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-800 text-cyan-300 font-bold border border-cyan-500/20 text-[10px] rounded-lg transition active:scale-95 cursor-pointer uppercase shrink-0"
                       >
-                        Copy
+                        {language === 'ru' ? 'Копировать' : 'Copy'}
                       </button>
                     </div>
                   </div>
@@ -746,22 +774,94 @@ export const ProfilePanel: React.FC = () => {
         {/* vault Media Tab view */}
         {activeTab === 'media' && (
           <div className="space-y-4">
-            <span className="text-[10px] font-mono uppercase text-slate-500 tracking-wider block">Shared Storage Logs</span>
-            <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-              <div className="bg-slate-900/40 p-4 border border-slate-800 rounded-xl flex flex-col items-center gap-1.5">
-                <ImageIcon className="w-5 h-5 text-cyan-400" />
-                <span>Photos / Pix</span>
-                <span className="font-mono text-[9px] text-slate-500">Auto Coped</span>
-              </div>
-              <div className="bg-slate-900/40 p-4 border border-slate-800 rounded-xl flex flex-col items-center gap-1.5">
-                <FileText className="w-5 h-5 text-sky-400" />
-                <span>Documents</span>
-                <span className="font-mono text-[9px] text-slate-500">Secure Direct</span>
-              </div>
+            {/* Sub-tabs for Vault */}
+            <div className="flex gap-2 p-1 bg-black/20 rounded-lg border border-white/5">
+              {(['media', 'files', 'links'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setMediaSubTab(t)}
+                  className={`flex-1 py-1 text-[10px] uppercase font-mono tracking-wider rounded-md transition-all cursor-pointer ${
+                    mediaSubTab === t 
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/20' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
             </div>
-            <p className="text-[10px] text-slate-500 leading-relaxed text-center py-4">
-              Expiring temporary URLs are rotated every session to preserve total security boundary metrics.
-            </p>
+
+            {mediaSubTab === 'media' && (
+              <div className="grid grid-cols-3 gap-1 animate-fade-in">
+                {sharedMedia.length > 0 ? sharedMedia.map(m => (
+                  <div key={m.id} className="aspect-square bg-slate-900 rounded overflow-hidden border border-white/5 group relative cursor-pointer">
+                    {m.type === 'image' || m.type === 'file' ? (
+                      <img src={m.fileUrl} alt="shared" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-black/40">
+                        <ImageIcon className="w-5 h-5 text-slate-500" />
+                      </div>
+                    )}
+                  </div>
+                )) : (
+                  <div className="col-span-3 py-10 text-center text-slate-500 font-mono text-[10px] uppercase tracking-widest">
+                    No visual media detected
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mediaSubTab === 'files' && (
+              <div className="space-y-1.5 animate-fade-in">
+                {sharedFiles.length > 0 ? sharedFiles.map(m => (
+                  <a 
+                    key={m.id} 
+                    href={m.fileUrl} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-3 p-2 bg-white/[0.02] border border-white/5 rounded-lg hover:bg-white/[0.05] transition-all group"
+                  >
+                    <div className="w-9 h-9 bg-slate-900 rounded-lg flex items-center justify-center border border-white/5 text-sky-400 shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-slate-200 truncate">{m.fileName}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{(m.fileSize || 0) > 1024 * 1024 ? `${((m.fileSize || 0) / (1024 * 1024)).toFixed(1)} MB` : `${((m.fileSize || 0) / 1024).toFixed(1)} KB`}</p>
+                    </div>
+                  </a>
+                )) : (
+                  <div className="py-10 text-center text-slate-500 font-mono text-[10px] uppercase tracking-widest">
+                    No documents found
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mediaSubTab === 'links' && (
+              <div className="space-y-1.5 animate-fade-in">
+                {sharedLinks.length > 0 ? sharedLinks.flatMap(m => m.links.map((link, idx) => (
+                  <a 
+                    key={`${m.id}-${idx}`} 
+                    href={link} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-3 p-2 bg-white/[0.02] border border-white/5 rounded-lg hover:bg-white/[0.05] transition-all group"
+                  >
+                    <div className="w-9 h-9 bg-slate-900 rounded-lg flex items-center justify-center border border-white/5 text-emerald-400 shrink-0">
+                      <Link className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-slate-200 truncate">{link}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">Shared by {m.senderName}</p>
+                    </div>
+                  </a>
+                ))) : (
+                  <div className="py-10 text-center text-slate-500 font-mono text-[10px] uppercase tracking-widest">
+                    No external links traced
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

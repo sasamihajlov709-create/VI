@@ -534,28 +534,27 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
       {subScreen === 'main' && (
         <div className="flex-1 flex flex-col min-h-0">
           {/* Header */}
-          <div className="p-4 border-b border-white/5 flex gap-2 shrink-0 bg-white/[0.01]">
+          <div className="pt-6 pb-4 px-5 border-b border-white/10 flex gap-4 shrink-0 bg-white/[0.02] backdrop-blur-3xl shadow-lg">
             <button 
               type="button" 
               onClick={onBack}
-              className="p-1 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition cursor-pointer self-start"
+              className="w-10 h-10 flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.1] rounded-[18px] text-slate-400 hover:text-white transition cursor-pointer self-center border border-white/10"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="flex flex-col gap-1">
-              <h2 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-cyan-400" />
+            <div className="flex flex-col justify-center">
+              <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
                 {t.title}
               </h2>
-              <span className="text-[10px] text-slate-400 font-medium">
+              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
                 {t.subtitle}
               </span>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
             {/* Upper Profile Identity Block */}
-            <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl flex flex-col items-center text-center gap-2.5 relative overflow-hidden group">
+            <div className="p-6 vision-floating-header border border-white/10 rounded-[28px] flex flex-col items-center text-center gap-4 relative overflow-hidden group shadow-2xl">
               <div className="absolute top-0 right-0 p-1">
                 <span className="text-[8px] font-mono uppercase bg-cyan-950 text-cyan-400 px-1.5 py-0.5 rounded-md border border-cyan-500/20">
                   {userProfile?.onlineStatus === 'online' ? 'Online' : 'Offline'}
@@ -623,7 +622,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             </div>
 
             {/* Structured Menu Categories */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {[
                 { id: 'account', label: t.secAccount, icon: User, color: 'text-cyan-400' },
                 { id: 'chats', label: t.secChats, icon: MessageSquare, color: 'text-emerald-400' },
@@ -641,13 +640,15 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                   <button
                     key={item.id}
                     onClick={() => setSubScreen(item.id as any)}
-                    className="w-full p-2.5 bg-white/[0.01] hover:bg-white/[0.03] active:bg-white/[0.04] border border-white/5 rounded-xl flex items-center justify-between text-left transition cursor-pointer gap-2"
+                    className="w-full p-3.5 bg-white/[0.03] hover:bg-white/[0.08] active:bg-white/[0.1] border border-white/10 rounded-[20px] flex items-center justify-between text-left transition duration-300 cursor-pointer gap-3 shadow-sm hover:shadow-md"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <IconComp className={`w-4 h-4 ${item.color} shrink-0`} />
-                      <span className="text-[11px] font-semibold text-slate-200 truncate">{item.label}</span>
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center bg-white/[0.04] border border-white/5`}>
+                        <IconComp className={`w-5 h-5 ${item.color} shrink-0`} />
+                      </div>
+                      <span className="text-[13.5px] font-bold text-slate-100 truncate tracking-tight">{item.label}</span>
                     </div>
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <ChevronRight className="w-4.5 h-4.5 text-slate-600 shrink-0" />
                   </button>
                 );
               })}
@@ -878,8 +879,10 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                 {[
                   { id: 'cosmic', name: language === 'ru' ? 'Космос' : 'Cosmic Slate', style: 'bg-slate-950' },
                   { id: 'aurora', name: language === 'ru' ? 'Аврора' : 'Aurora Dream', style: 'bg-gradient-to-tr from-indigo-950 to-teal-950' },
-                  { id: 'minimal', name: language === 'ru' ? 'Темный' : 'Charcoal', style: 'bg-zinc-900' },
-                  { id: 'warm', name: language === 'ru' ? 'Закат' : 'Warm Sunset', style: 'bg-gradient-to-tr from-amber-950 via-purple-950 to-slate-950' }
+                  { id: 'midnight', name: language === 'ru' ? 'Полночь' : 'Midnight Velvet', style: 'bg-black' },
+                  { id: 'ocean', name: language === 'ru' ? 'Океан' : 'Deep Ocean', style: 'bg-teal-950' },
+                  { id: 'sunset', name: language === 'ru' ? 'Закат' : 'Burning Sunset', style: 'bg-gradient-to-tr from-amber-950 via-rose-950 to-slate-950' },
+                  { id: 'minimal', name: language === 'ru' ? 'Темный' : 'Charcoal', style: 'bg-zinc-900' }
                 ].map((wItem) => (
                   <button
                     key={wItem.id}

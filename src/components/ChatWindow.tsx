@@ -24,6 +24,7 @@ import {
   CornerUpLeft, 
   Copy,
   FolderLock,
+  FileText,
   Plus,
   Camera,
   Play,
@@ -40,7 +41,14 @@ import {
   Info,
   Sparkles,
   UserCheck,
-  Globe
+  Globe,
+  ThumbsUp,
+  RefreshCw,
+  Zap,
+  ChevronLeft,
+  BarChart3,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -223,10 +231,49 @@ const LinkPreview: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+// Format millisecond duration into m:ss,d format (e.g. 0:01,3)
+const formatVideoDuration = (ms: number) => {
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  const tenths = Math.floor((ms % 1000) / 100);
+  return `${minutes}:${seconds.toString().padStart(2, '0')},${tenths}`;
+};
+
 // Helper components for inline players to preserve reactive focus and layout isolation
 const CircularVideoNote: React.FC<{ src: string }> = ({ src }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
+  const [playing, setPlaying] = useState(true);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleTimeUpdate = () => {
+      if (video.duration) {
+        setProgress(video.currentTime / video.duration);
+      }
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+    };
+  }, []);
+
+  const handleVideoClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (videoRef.current) {
+      if (playing) {
+        videoRef.current.pause();
+        setPlaying(false);
+      } else {
+        videoRef.current.play().catch(() => {});
+        setPlaying(true);
+      }
+    }
+  };
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -237,7 +284,10 @@ const CircularVideoNote: React.FC<{ src: string }> = ({ src }) => {
   };
 
   return (
-    <div className="relative w-40 h-40 md:w-44 md:h-44 rounded-full overflow-hidden border-2 border-cyan-500/30 bg-black cursor-pointer shadow-lg mx-auto md:mx-0 my-1 group-all shrink-0">
+    <div 
+      onClick={handleVideoClick}
+      className="relative w-44 h-44 sm:w-48 sm:h-48 rounded-full overflow-hidden border-2 border-white/10 bg-black cursor-pointer shadow-lg mx-auto md:mx-0 my-1 group shrink-0"
+    >
       <video 
         ref={videoRef}
         src={src || undefined} 
@@ -245,15 +295,48 @@ const CircularVideoNote: React.FC<{ src: string }> = ({ src }) => {
         muted={muted} 
         playsInline 
         autoPlay 
-        className="w-full h-full object-cover" 
+        className="w-full h-full object-cover rounded-full" 
       />
+      
+      {/* Dynamic progress ring circling the video note */}
+      <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 100 100">
+        <circle 
+          cx="50" 
+          cy="50" 
+          r="48" 
+          stroke="rgba(255, 255, 255, 0.08)"
+          strokeWidth="1.5" 
+          fill="transparent" 
+        />
+        <circle 
+          cx="50" 
+          cy="50" 
+          r="48" 
+          stroke="#9d7cf6"
+          strokeWidth="2" 
+          fill="transparent" 
+          strokeDasharray={2 * Math.PI * 48}
+          strokeDashoffset={2 * Math.PI * 48 * (1 - progress)}
+          className="transition-all duration-100 ease-linear"
+        />
+      </svg>
+
+      {/* Control overlays */}
+      <div className="absolute inset-0 bg-transparent group-hover:bg-black/20 flex items-center justify-center transition-all duration-300">
+        {!playing && (
+          <div className="p-3 rounded-full bg-black/60 text-white backdrop-blur-sm shadow">
+            <Play className="w-5 h-5 fill-white" />
+          </div>
+        )}
+      </div>
+
       <button 
         type="button"
         onClick={toggleMute}
-        className="absolute bottom-2 right-2 p-1.5 rounded-full bg-slate-950/80 hover:bg-slate-900 text-cyan-400 border border-slate-800 text-xs shadow transition-all"
-        title="Mute/Unmute"
+        className="absolute bottom-2.5 right-2 a-pill p-1.5 rounded-full bg-black/60 hover:bg-black/85 text-white border border-white/10 text-xs shadow-md transition-all active:scale-90 z-20"
+        title={muted ? "Unmute" : "Mute"}
       >
-        {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+        {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#9d7cf6]" />}
       </button>
     </div>
   );
@@ -420,6 +503,7 @@ export const ChatWindow: React.FC = () => {
     currentUser, 
     userProfile,
     activeChat, 
+    chats,
     setActiveChat,
     isRightPanelOpen,
     setIsRightPanelOpen,
@@ -448,7 +532,9 @@ export const ChatWindow: React.FC = () => {
     createDirectChat,
     addMemberToChat,
     addContactByUsername,
-    onlineUsers
+    onlineUsers,
+    forwardingMessage,
+    setForwardingMessage
   } = useMessenger();
 
   const { t, language } = useLanguage();
@@ -514,6 +600,178 @@ export const ChatWindow: React.FC = () => {
   };
 
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [forwardSearchQuery, setForwardSearchQuery] = useState('');
+
+  // Custom floating hearts on double-tap message bubble
+  const [floatingHearts, setFloatingHearts] = useState<{ id: number; x: number; y: number }[]>([]);
+  const nextHeartId = useRef(0);
+
+  const triggerFloatHeart = (clientX: number, clientY: number) => {
+    const id = nextHeartId.current++;
+    setFloatingHearts(prev => [...prev, { id, x: clientX, y: clientY }]);
+    setTimeout(() => {
+      setFloatingHearts(prev => prev.filter(h => h.id !== id));
+    }, 850);
+  };
+
+  // Custom Edge Swipe back to close active chat on mobile
+  const swipeBackDxRef = useRef(0);
+  const swipeBackStartXRef = useRef(0);
+  const swipeBackStartYRef = useRef(0);
+  const swipeLockDirection = useRef<'none' | 'horizontal' | 'vertical'>('none');
+  const isSwipeBackEligibleRef = useRef(false);
+  const [swipeBackAnimateOut, setSwipeBackAnimateOut] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const animationFrameIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+    };
+  }, []);
+
+  const handleChatTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768) return;
+    const target = e.target as HTMLElement;
+    // Don't intercept swipe if they are interacting with horizontal scrolling elements or inputs
+    if (target.closest('.no-swipe') || target.closest('input, textarea, button, [role="slider"], .message-swipe-container')) return;
+    
+    const touch = e.touches[0];
+    swipeBackStartXRef.current = touch.clientX;
+    swipeBackStartYRef.current = touch.clientY;
+    isSwipeBackEligibleRef.current = true;
+    swipeLockDirection.current = 'none';
+    swipeBackDxRef.current = 0;
+    setSwipeBackAnimateOut(false);
+  };
+
+  const handleChatTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!isSwipeBackEligibleRef.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - swipeBackStartXRef.current;
+    const dy = touch.clientY - swipeBackStartYRef.current;
+
+    if (swipeLockDirection.current === 'none') {
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10 && dx > 0) {
+        swipeLockDirection.current = 'horizontal';
+      } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+        swipeLockDirection.current = 'vertical';
+      }
+    }
+
+    if (swipeLockDirection.current === 'horizontal' && dx > 0) {
+      if (e.cancelable) e.preventDefault();
+      swipeBackDxRef.current = dx;
+      if (!animationFrameIdRef.current) {
+        animationFrameIdRef.current = requestAnimationFrame(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.style.transition = 'none';
+            chatContainerRef.current.style.transform = `translate3d(${swipeBackDxRef.current}px, 0, 0)`;
+          }
+          animationFrameIdRef.current = null;
+        });
+      }
+    }
+  };
+
+  const handleChatTouchEnd = () => {
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+    
+    if (!isSwipeBackEligibleRef.current) return;
+    isSwipeBackEligibleRef.current = false;
+    if (swipeBackDxRef.current > 120) {
+      setSwipeBackAnimateOut(true);
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.transition = 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)';
+        chatContainerRef.current.style.transform = `translate3d(100%, 0, 0)`;
+      }
+      setTimeout(() => {
+        setActiveChat(null);
+        swipeBackDxRef.current = 0;
+        setSwipeBackAnimateOut(false);
+      }, 250);
+    } else {
+      swipeBackDxRef.current = 0;
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.transition = 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)';
+        chatContainerRef.current.style.transform = `translate3d(0px, 0, 0)`;
+      }
+    }
+  };
+
+  const handleChatMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (window.innerWidth >= 768) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.no-swipe') || target.closest('input, textarea, button, [role="slider"], .message-swipe-container')) return;
+
+    swipeBackStartXRef.current = e.clientX;
+    swipeBackStartYRef.current = e.clientY;
+    isSwipeBackEligibleRef.current = true;
+    swipeLockDirection.current = 'none';
+    swipeBackDxRef.current = 0;
+    setSwipeBackAnimateOut(false);
+  };
+
+  const handleChatMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isSwipeBackEligibleRef.current) return;
+    const dx = e.clientX - swipeBackStartXRef.current;
+    const dy = e.clientY - swipeBackStartYRef.current;
+
+    if (swipeLockDirection.current === 'none') {
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10 && dx > 0) {
+        swipeLockDirection.current = 'horizontal';
+      } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+        swipeLockDirection.current = 'vertical';
+      }
+    }
+
+    if (swipeLockDirection.current === 'horizontal' && dx > 0) {
+      if (e.cancelable) e.preventDefault();
+      swipeBackDxRef.current = dx;
+      if (!animationFrameIdRef.current) {
+        animationFrameIdRef.current = requestAnimationFrame(() => {
+          if (chatContainerRef.current) {
+            chatContainerRef.current.style.transition = 'none';
+            chatContainerRef.current.style.transform = `translate3d(${swipeBackDxRef.current}px, 0, 0)`;
+          }
+          animationFrameIdRef.current = null;
+        });
+      }
+    }
+  };
+
+  const handleChatMouseUp = () => {
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+    
+    if (!isSwipeBackEligibleRef.current) return;
+    isSwipeBackEligibleRef.current = false;
+    if (swipeBackDxRef.current > 120) {
+      setSwipeBackAnimateOut(true);
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.transition = 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)';
+        chatContainerRef.current.style.transform = `translate3d(100%, 0, 0)`;
+      }
+      setTimeout(() => {
+        setActiveChat(null);
+        swipeBackDxRef.current = 0;
+        setSwipeBackAnimateOut(false);
+      }, 250);
+    } else {
+      swipeBackDxRef.current = 0;
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.transition = 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)';
+        chatContainerRef.current.style.transform = `translate3d(0px, 0, 0)`;
+      }
+    }
+  };
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null); // messageId
@@ -689,11 +947,17 @@ export const ChatWindow: React.FC = () => {
 
   // Live Circular Camera Recording parameters
   const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [isRecorderHovered, setIsRecorderHovered] = useState(false);
+  const [isVideoStreamReady, setIsVideoStreamReady] = useState(false);
   const [recordingMode, setRecordingMode] = useState<'voice' | 'video'>('voice');
   const pressStartTimeRef = useRef<number>(0);
   const [recordVideoDuration, setRecordVideoDuration] = useState(0);
+  const [recordVideoMs, setRecordVideoMs] = useState(0);
+  const [videoFacingMode, setVideoFacingMode] = useState<'user' | 'environment'>('user');
+  const [isFlashOn, setIsFlashOn] = useState(false);
   const [videoRecordingState, setVideoRecordingState] = useState<'idle' | 'holding' | 'locked'>('idle');
   const [videoGestures, setVideoGestures] = useState({ startX: 0, startY: 0, currentX: 0, currentY: 0 });
+  const [videoZoom, setVideoZoom] = useState<number>(1);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
   const videoStreamRef = useRef<MediaStream | null>(null);
@@ -715,6 +979,18 @@ export const ChatWindow: React.FC = () => {
   }, [messages, activeChat?.id, currentUser?.uid]);
 
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  const [wallpaperSelection, setWallpaperSelection] = useState<string>(() => localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
+  const [customWallpaperColor, setCustomWallpaperColor] = useState<string>(() => localStorage.getItem('vi-custom-wallpaper-color') || '#0d0e12');
+
+  useEffect(() => {
+    const handleSettingsChange = () => {
+      setWallpaperSelection(localStorage.getItem('vi-chat-wallpaper') || 'cosmic');
+      setCustomWallpaperColor(localStorage.getItem('vi-custom-wallpaper-color') || '#0d0e12');
+    };
+    window.addEventListener('vi-settings-changed', handleSettingsChange);
+    return () => window.removeEventListener('vi-settings-changed', handleSettingsChange);
+  }, []);
 
   useEffect(() => {
     if (!activeChat || !activeChat.slowModeSeconds || !myLastMessage || !currentUser) {
@@ -863,6 +1139,17 @@ export const ChatWindow: React.FC = () => {
 
   const activeMenuMessage = activeMessageMenuId ? visibleMessages.find(m => m.id === activeMessageMenuId) : null;
 
+  const handleForwardMessage = async (targetChatId: string) => {
+    if (!forwardingMessage) return;
+    try {
+      await sendTextMessage('', undefined, forwardingMessage, undefined, false, undefined, targetChatId);
+      setForwardingMessage(null);
+      setToast({ message: language === 'ru' ? 'Сообщение переслано!' : 'Message forwarded!', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: language === 'ru' ? 'Ошибка при пересылке' : 'Forward error: ' + err.message, type: 'error' });
+    }
+  };
+
   // When active chat fundamentally changes or loads for the first time
   useEffect(() => {
     if (!scrollContainerRef.current) return;
@@ -908,12 +1195,15 @@ export const ChatWindow: React.FC = () => {
       isVideoCancelledRef.current = false;
       videoRecorderRef.current = null;
       setIsRecordingVideo(true);
+      setIsVideoStreamReady(false);
       setRecordVideoDuration(0);
+      setRecordVideoMs(0);
       setVideoRecordingState('holding');
+      pressStartTimeRef.current = Date.now();
       setVideoGestures({ startX: clientX, startY: clientY, currentX: clientX, currentY: clientY });
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: true, 
-        video: { width: 320, height: 320, facingMode: 'user' } 
+        video: { width: 360, height: 360, facingMode: videoFacingMode } 
       });
       if (isVideoCancelledRef.current) {
         stream.getTracks().forEach(track => track.stop());
@@ -923,6 +1213,7 @@ export const ChatWindow: React.FC = () => {
       if (videoPreviewRef.current) {
         videoPreviewRef.current.srcObject = stream;
       }
+      setIsVideoStreamReady(true);
       
       let options = {};
       if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
@@ -954,21 +1245,22 @@ export const ChatWindow: React.FC = () => {
           logger.error("Failed to send video message during onstop", { error: err.message, stack: err.stack });
         } finally {
           setRecordVideoDuration(0);
+          setRecordVideoMs(0);
           stream.getTracks().forEach(track => track.stop());
         }
       };
 
       recorder.start();
 
+      let startTime = Date.now();
       videoTimerRef.current = setInterval(() => {
-        setRecordVideoDuration(prev => {
-          if (prev >= 60) {
-            stopVideoRecording();
-            return 60;
-          }
-          return prev + 1;
-        });
-      }, 1000);
+        const elapsed = Date.now() - startTime;
+        setRecordVideoMs(elapsed);
+        setRecordVideoDuration(Math.floor(elapsed / 1000));
+        if (elapsed >= 60000) {
+          stopVideoRecording();
+        }
+      }, 100);
     } catch (err: any) {
       setIsRecordingVideo(false);
       logger.error("Camera webcam capture initiation error:", { error: err.message, stack: err.stack });
@@ -978,9 +1270,20 @@ export const ChatWindow: React.FC = () => {
 
   const stopVideoRecording = () => {
     setVideoRecordingState('idle');
+    setIsFlashOn(false);
+    setIsVideoStreamReady(false);
+    setVideoZoom(1);
+    pressStartTimeRef.current = 0;
     if (!videoRecorderRef.current) {
       isVideoCancelledRef.current = true;
       setIsRecordingVideo(false);
+      setRecordVideoMs(0);
+      if (videoStreamRef.current) {
+        try {
+          videoStreamRef.current.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        videoStreamRef.current = null;
+      }
     }
     if (videoRecorderRef.current && isRecordingVideo) {
       videoRecorderRef.current.stop();
@@ -992,41 +1295,145 @@ export const ChatWindow: React.FC = () => {
   const cancelVideoRecording = () => {
     isVideoCancelledRef.current = true;
     setVideoRecordingState('idle');
-    if (videoRecorderRef.current && isRecordingVideo) {
-      videoRecorderRef.current.onstop = null;
-      videoRecorderRef.current.stop();
-      setIsRecordingVideo(false);
-      clearInterval(videoTimerRef.current);
-      setRecordVideoDuration(0);
-      if (videoStreamRef.current) {
+    setIsFlashOn(false);
+    setIsVideoStreamReady(false);
+    setVideoZoom(1);
+    setRecordVideoMs(0);
+    setIsRecordingVideo(false);
+    clearInterval(videoTimerRef.current);
+    setRecordVideoDuration(0);
+    pressStartTimeRef.current = 0;
+    if (videoRecorderRef.current) {
+      try {
+        videoRecorderRef.current.onstop = null;
+        if (videoRecorderRef.current.state !== 'inactive') {
+          videoRecorderRef.current.stop();
+        }
+      } catch (e) {}
+    }
+    if (videoStreamRef.current) {
+      try {
         videoStreamRef.current.getTracks().forEach(t => t.stop());
+      } catch (e) {}
+      videoStreamRef.current = null;
+    }
+  };
+
+  const flipVideoCamera = async () => {
+    try {
+      const nextFacingMode = videoFacingMode === 'user' ? 'environment' : 'user';
+      setVideoFacingMode(nextFacingMode);
+      
+      if (videoStreamRef.current && isRecordingVideo) {
+        setIsVideoStreamReady(false);
+        // Stop current video track
+        const currentVideoTrack = videoStreamRef.current.getVideoTracks()[0];
+        if (currentVideoTrack) {
+          currentVideoTrack.stop();
+          videoStreamRef.current.removeTrack(currentVideoTrack);
+        }
+        
+        // Request new track with nextFacingMode
+        const tempStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 360, height: 360, facingMode: nextFacingMode }
+        });
+        const newVideoTrack = tempStream.getVideoTracks()[0];
+        
+        if (newVideoTrack) {
+          videoStreamRef.current.addTrack(newVideoTrack);
+          // Stop template other tracks
+          tempStream.getAudioTracks().forEach(track => track.stop());
+        }
+        
+        // Update live preview object
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = null;
+          videoPreviewRef.current.srcObject = videoStreamRef.current;
+        }
+        setIsVideoStreamReady(true);
       }
+    } catch (err: any) {
+      logger.error("Failed to flip video camera stream track:", err);
+      showToast(language === 'ru' ? 'Камера не поддерживает быструю смену или заблокирована.' : 'Camera configuration change not supported on this device.', 'info');
+    }
+  };
+
+  const toggleFlash = async () => {
+    try {
+      const videoTrack = videoStreamRef.current?.getVideoTracks()[0];
+      if (!videoTrack) return;
+      
+      const capabilities = (videoTrack as any).getCapabilities?.() || {};
+      if (capabilities.torch) {
+        const nextFlash = !isFlashOn;
+        await videoTrack.applyConstraints({
+          advanced: [{ torch: nextFlash } as any]
+        });
+        setIsFlashOn(nextFlash);
+      } else {
+        showToast(language === 'ru' ? 'Режим вспышки не поддерживается данной камерой.' : 'Torch/Flash not supported on this camera layout.', 'info');
+      }
+    } catch (err: any) {
+      logger.error("Error applying torch constraint:", err);
     }
   };
 
   const handleVideoRecordMove = (clientX: number, clientY: number) => {
-    if (videoRecordingState !== 'holding') return;
+    if (videoRecordingState !== 'holding' && pressStartTimeRef.current === 0) return;
     
     setVideoGestures(prev => {
-      const current = { ...prev, currentX: clientX, currentY: clientY };
-      const distanceX = prev.startX - clientX;
-      const distanceY = prev.startY - clientY;
+      const startX = prev.startX || clientX;
+      const startY = prev.startY || clientY;
+      const current = { startX, startY, currentX: clientX, currentY: clientY };
+      const distanceX = startX - clientX;
+      const distanceY = startY - clientY;
       
       if (distanceX > 80) {
         setTimeout(() => cancelVideoRecording(), 10);
       } else if (distanceY > 60) {
         setVideoRecordingState('locked');
       }
+      
+      let computedZoom = 1;
+      if (distanceY > 15) {
+        computedZoom = Math.min(3.0, 1.0 + ((distanceY - 15) / 185) * 2.0);
+      } else {
+        computedZoom = 1.0;
+      }
+      setVideoZoom(computedZoom);
+      
+      if (videoStreamRef.current) {
+        try {
+          const videoTrack = videoStreamRef.current.getVideoTracks()[0];
+          if (videoTrack) {
+            const capabilities = videoTrack.getCapabilities() as any;
+            if (capabilities && capabilities.zoom) {
+              const minZoom = capabilities.zoom.min || 1;
+              const maxZoom = capabilities.zoom.max || 3;
+              const trackZoom = minZoom + (computedZoom - 1) * (maxZoom - minZoom) / 2;
+              const targetZoom = Math.max(minZoom, Math.min(maxZoom, trackZoom));
+              videoTrack.applyConstraints({ advanced: [{ zoom: targetZoom }] as any }).catch(() => {});
+            }
+          }
+        } catch (err) {}
+      }
+
       return current;
     });
   };
 
   const handleVideoRecordRelease = () => {
-    if (videoRecordingState === 'holding') {
-      const distanceX = videoGestures.startX - videoGestures.currentX;
-      const distanceY = videoGestures.startY - videoGestures.currentY;
+    if (videoRecordingState === 'holding' || pressStartTimeRef.current > 0) {
+      const startX = videoGestures.startX || videoGestures.currentX;
+      const startY = videoGestures.startY || videoGestures.currentY;
+      const distanceX = startX - videoGestures.currentX;
+      const distanceY = startY - videoGestures.currentY;
+      const holdDuration = Date.now() - pressStartTimeRef.current;
       
-      if (distanceX > 80) {
+      if (holdDuration < 250) {
+        cancelVideoRecording();
+        setRecordingMode('voice');
+      } else if (distanceX > 80) {
         cancelVideoRecording();
       } else if (distanceY > 60) {
         setVideoRecordingState('locked');
@@ -1056,8 +1463,14 @@ export const ChatWindow: React.FC = () => {
       const type = isImg ? 'image' : isVid ? 'video' : 'file';
       await sendFileMessage(fileToUpload, type);
       
+      // If there is also text, send it as a separate message
+      if (inputText.trim()) {
+        await sendTextMessage(inputText);
+      }
+      
       // Focus element on file transmit completed
       setTimeout(() => inputRef.current?.focus(), 150);
+      setInputText('');
       return;
     }
 
@@ -1070,11 +1483,13 @@ export const ChatWindow: React.FC = () => {
       await sendTextMessage(
         inputText,
         replyTarget || undefined,
-        undefined,
+        forwardingMessage || undefined,
         activeTopicId || undefined,
         isSilent,
         scheduledTime || undefined
       );
+      if (forwardingMessage) setForwardingMessage(null);
+      setReplyTarget(null);
     }
 
     setInputText('');
@@ -1126,161 +1541,85 @@ export const ChatWindow: React.FC = () => {
     showToast(language === 'ru' ? 'Текст скопирован в буфер обмена' : 'Text copied to clipboard', 'success');
   };
 
-  if (!activeChat) {
-    const getGreeting = () => {
-      const hours = new Date().getHours();
-      if (hours < 6) return language === 'ru' ? 'Доброй ночи' : 'Good night';
-      if (hours < 12) return language === 'ru' ? 'Доброе утро' : 'Good morning';
-      if (hours < 18) return language === 'ru' ? 'Добрый день' : 'Good afternoon';
-      return language === 'ru' ? 'Добрый вечер' : 'Good evening';
-    };
-
-    const contactSuggestions = (globalUsers || [])
-      .filter(u => currentUser && u.uid !== currentUser.uid)
-      .slice(0, 3);
-
-    return (
-      <div className="hidden md:flex flex-1 bg-[#07080b] flex-col p-8 md:p-12 overflow-y-auto h-full justify-center select-none relative">
-        {/* Futuristic Glass Ambient Background Wallpaper Overlay */}
-        <div className="absolute inset-0 z-0 opacity-80 pointer-events-none" style={{
+  const getWallpaperStyle = (): { backgroundImage?: string; backgroundColor?: string; backgroundAttachment?: string } => {
+    switch (wallpaperSelection) {
+      case 'aurora':
+        return {
           backgroundImage: `
-            radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.1), transparent 70%),
-            radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05), transparent 50%)
+            radial-gradient(circle at 10% 10%, rgba(20, 184, 166, 0.16), transparent 60%),
+            radial-gradient(circle at 80% 90%, rgba(99, 102, 241, 0.16), transparent 60%),
+            radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.08), transparent 70%)
           `,
-          backgroundAttachment: 'fixed',
-          pointerEvents: 'none'
-        }} />
-        <div className="max-w-3xl w-full mx-auto space-y-8 animate-fade-in-up relative z-10">
-          
-          {/* Main welcome banner with dynamic greeting & user avatar */}
-          <div className="flex flex-col md:flex-row items-center md:items-start gap-6 bg-white/[0.02] border border-white/5 p-6 md:p-8 rounded-3xl backdrop-blur-md relative overflow-hidden shadow-xl">
-            <div className="absolute top-0 right-0 w-36 h-36 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
-            
-            <div className="relative shrink-0">
-              <img 
-                src={userProfile?.photoURL || 'https://api.dicebear.com/7.x/adventurer/svg'} 
-                alt="Profile" 
-                className="w-20 h-20 md:w-24 md:h-24 rounded-full object-cover border-2 border-[var(--glass-accent)] shadow-lg shadow-cyan-500/10"
-              />
-              <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-[#121215] shadow-inner" />
-            </div>
-            
-            <div className="text-center md:text-left space-y-2 min-w-0 flex-1">
-              <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-accent)] font-mono px-2.5 py-1 bg-cyan-500/10 rounded-full border border-cyan-500/10">
-                {language === 'ru' ? 'Добро пожаловать' : 'Welcome to VI'}
-              </span>
-              <h1 className="text-2xl md:text-3xl font-extrabold text-slate-100 tracking-tight leading-none mt-2">
-                {getGreeting()}, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-sky-400 font-black">{userProfile?.displayName}</span>!
-              </h1>
-              <p className="text-xs text-slate-400 font-medium font-mono">@{userProfile?.username}</p>
-              
-              {userProfile?.bio && (
-                <p className="text-xs text-slate-400 leading-relaxed bg-black/20 p-2.5 rounded-xl border border-white/[0.03] mt-3">
-                  <span className="font-mono text-[9px] text-slate-500 block uppercase tracking-wider mb-0.5">{language === 'ru' ? 'О себе' : 'Bio'}</span>
-                  {userProfile.bio}
-                </p>
-              )}
-            </div>
+          backgroundColor: '#030712',
+          backgroundAttachment: 'fixed'
+        };
+      case 'midnight':
+        return {
+          backgroundColor: '#050505',
+          backgroundImage: 'radial-gradient(circle at center, #0a0a0a 0%, #000 100%)',
+          backgroundAttachment: 'fixed'
+        };
+      case 'ocean':
+        return {
+          backgroundImage: 'linear-gradient(180deg, #0d2e33 0%, #05161a 100%)',
+          backgroundColor: '#05161a',
+          backgroundAttachment: 'fixed'
+        };
+      case 'sunset':
+        return {
+          backgroundImage: 'linear-gradient(45deg, #1e1313 0%, #1a0b16 50%, #0c0c16 100%)',
+          backgroundColor: '#0c0c16',
+          backgroundAttachment: 'fixed'
+        };
+      case 'minimal':
+        return {
+          backgroundImage: 'none',
+          backgroundColor: '#09090b',
+          backgroundAttachment: 'fixed'
+        };
+      case 'warm':
+        return {
+          backgroundImage: `
+            radial-gradient(circle at 90% 10%, rgba(245, 158, 11, 0.12), transparent 50%),
+            radial-gradient(circle at 10% 90%, rgba(157, 23, 77, 0.12), transparent 60%),
+            radial-gradient(circle at 50% 30%, rgba(124, 58, 237, 0.06), transparent 70%)
+          `,
+          backgroundColor: '#0a050d',
+          backgroundAttachment: 'fixed'
+        };
+      case 'custom-color':
+        return {
+          backgroundImage: 'radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.02), transparent 75%)',
+          backgroundColor: customWallpaperColor || '#0d0e12',
+          backgroundAttachment: 'fixed'
+        };
+      case 'cosmic':
+      default:
+        return {
+          backgroundImage: `
+            radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.12), transparent 70%),
+            radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08), transparent 50%),
+            radial-gradient(circle at 90% 10%, rgba(236, 72, 153, 0.05), transparent 40%)
+          `,
+          backgroundColor: '#07080b',
+          backgroundAttachment: 'fixed'
+        };
+    }
+  };
+
+  if (!activeChat) {
+    return (
+      <div 
+        className="hidden md:flex flex-1 flex-col items-center justify-center p-8 overflow-y-auto h-full select-none relative transition-colors duration-350 bg-[#0a0a0a]"
+      >
+        <div className="max-w-md w-full text-center space-y-4 animate-fade-in relative z-10">
+          <div className="w-20 h-20 bg-cyan-500/10 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-cyan-500/20 shadow-xl shadow-cyan-500/5">
+            <MessageSquare className="w-10 h-10 text-cyan-500" />
           </div>
-
-          {/* Bento-style dashboard grids */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            
-            {/* Bento Card 1: Saved Messages shortcut */}
-            <div 
-              onClick={async () => {
-                if (userProfile) {
-                  await createDirectChat(userProfile);
-                }
-              }}
-              className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl hover:bg-white/[0.04] hover:border-cyan-500/20 active:scale-[0.98] transition-all cursor-pointer flex flex-col justify-between group shadow-lg min-h-[180px]"
-            >
-              <div className="flex justify-between items-start">
-                <div className="p-3 bg-cyan-500/10 text-[var(--glass-accent)] rounded-2xl border border-cyan-500/15 group-hover:scale-110 transition-transform">
-                  <Bookmark className="w-6.5 h-6.5" />
-                </div>
-                <span className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider">
-                  {language === 'ru' ? 'Избранное' : 'Cloud Sandbox'}
-                </span>
-              </div>
-              <div className="space-y-1.5 pt-4">
-                <h3 className="text-sm font-bold text-slate-200 group-hover:text-[var(--glass-accent)] transition-colors">
-                  {language === 'ru' ? 'Избранные сообщения' : 'Saved Messages'}
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                  {language === 'ru' 
-                    ? 'Ваше личное облачное хранилище для хранения файлов, текстовых заметок, ссылок и черновиков.' 
-                    : 'Your personal encrypted sandbox cloud to store files, voice notes, code snippets or drafts.'}
-                </p>
-              </div>
-            </div>
-
-            {/* Bento Card 2: Contact suggestions */}
-            <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl shadow-lg min-h-[180px] flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start mb-4">
-                  <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/15">
-                    <UserCheck className="w-6.5 h-6.5" />
-                  </div>
-                  <span className="text-[10px] font-mono font-bold uppercase text-slate-500 tracking-wider">
-                    {language === 'ru' ? 'Рекомендации' : 'Live Contacts'}
-                  </span>
-                </div>
-                
-                <h3 className="text-sm font-bold text-slate-200">
-                  {language === 'ru' ? 'Быстрый доступ к контактам' : 'Connect with Contacts'}
-                </h3>
-                
-                {contactSuggestions.length > 0 ? (
-                  <div className="space-y-2 mt-3">
-                    {contactSuggestions.map((u) => (
-                      <div 
-                        key={u.uid} 
-                        onClick={async () => {
-                          await createDirectChat(u);
-                        }}
-                        className="flex items-center justify-between p-2 rounded-xl bg-black/25 hover:bg-white/5 border border-white/5 hover:border-cyan-500/10 transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <img src={u.photoURL || undefined} alt={u.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0" />
-                          <div className="min-w-0">
-                            <h4 className="text-xs font-bold text-slate-200 truncate group-hover:text-[var(--glass-accent)]">{u.displayName}</h4>
-                            <p className="text-[10px] font-mono text-slate-500 truncate">@{u.username}</p>
-                          </div>
-                        </div>
-                        <span className="text-[9px] font-bold font-mono tracking-wider text-cyan-400 bg-cyan-500/10 border border-cyan-500/10 px-2 py-0.5 rounded-md uppercase">
-                          {language === 'ru' ? 'Чат' : 'Chat'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500 font-sans mt-2">
-                    {language === 'ru' 
-                      ? 'Другие зарегистрированные пользователи пока не найдены.' 
-                      : 'No other active node users found in this workspace context.'}
-                  </p>
-                )}
-              </div>
-            </div>
-
-          </div>
-
-          {/* Quick tips & stats strip */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 px-6 bg-white/[0.01] border border-white/[0.03] rounded-2xl text-xs text-slate-450 select-none">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>
-                {language === 'ru' 
-                  ? 'Совет: Проведите пальцем влево на сообщении для мгновенного ответа!' 
-                  : 'Pro Tip: Swipe left on any message for a lightning fast reply!'}
-              </span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-mono text-slate-500">
-              <span>Secure Ingress Protection ACTIVE</span>
-            </div>
-          </div>
-
+          <h2 className="text-xl font-bold text-slate-100">{language === 'ru' ? 'Выберите чат, чтобы начать общение' : 'Select a chat to start messaging'}</h2>
+          <p className="text-sm text-slate-400 max-w-xs mx-auto leading-relaxed">
+            {language === 'ru' ? 'Ваши сообщения защищены сквозным шифрованием.' : 'Your messages are secured with end-to-end encryption.'}
+          </p>
         </div>
       </div>
     );
@@ -1291,9 +1630,22 @@ export const ChatWindow: React.FC = () => {
 
   return (
     <div 
-      className="flex-1 bg-[#090909] flex flex-col relative overflow-hidden"
-      style={{ height: viewportHeight > 0 ? viewportHeight : '100%' }}
+      ref={chatContainerRef}
+      className="flex-1 flex flex-col relative overflow-hidden"
+      style={{ 
+        height: viewportHeight > 0 ? viewportHeight : '100%', 
+        backgroundColor: getWallpaperStyle().backgroundColor,
+        transform: swipeBackAnimateOut ? 'translate3d(100%, 0, 0)' : 'translate3d(0px, 0, 0)',
+        transition: 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1), background-color 350ms ease'
+      }}
       onDragEnter={handleDrag}
+      onTouchStart={handleChatTouchStart}
+      onTouchMove={handleChatTouchMove}
+      onTouchEnd={handleChatTouchEnd}
+      onMouseDown={handleChatMouseDown}
+      onMouseMove={handleChatMouseMove}
+      onMouseUp={handleChatMouseUp}
+      onMouseLeave={handleChatMouseUp}
       onClick={(e) => {
         // If clicking outside an active menu, close it
         if (activeMessageMenuId) {
@@ -1321,142 +1673,227 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
-      {/* Dynamic Header */}
-      <div className="px-4 md:px-6 py-3 bg-white/[0.02] backdrop-blur-md border-b border-white/[0.05] flex justify-between items-center z-20 shrink-0 shadow-md">
-        <div className="flex items-center gap-3.5 min-w-0">
-          {/* Back button on mobile */}
-          <button 
-            type="button"
-            onClick={() => setActiveChat(null)}
-            className="md:hidden text-slate-350 hover:text-white transition shrink-0 p-1.5 hover:bg-white/5 rounded-full mr-1 flex items-center justify-center border border-white/5 cursor-pointer"
-            title={language === 'ru' ? 'Назад к чатам' : 'Back to chats'}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          
-          <div 
-            onClick={() => {
-              if (activeChat.type === 'direct') {
-                const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
-                const partnerProfile = globalUsers.find(u => u.uid === partnerId);
-                if (partnerProfile) {
-                  setSelectedUserProfile(partnerProfile);
-                }
-              } else {
-                setIsRightPanelOpen(true);
-              }
-            }}
-            className="flex items-center gap-3.5 min-w-0 cursor-pointer hover:opacity-85 transition"
-          >
-            <img 
-              src={activeChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(activeChat.title)}`} 
-              alt={activeChat.title} 
-              className="w-9 h-9 md:w-10 md:h-10 rounded-full object-cover border border-white/10 shadow-sm" 
-            />
+      {/* VisionOS Floating Header Container */}
+      <div className="absolute top-0 left-0 right-0 p-4 md:p-6 z-[150] pointer-events-none flex justify-center">
+        <div className="w-full max-w-6xl h-[72px] vision-floating-header rounded-[36px] flex items-center justify-between px-5 md:px-7 pointer-events-auto animate-fade-in-down transition-all duration-500 shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+          <div className="flex items-center gap-4 min-w-0">
+            <button 
+              type="button"
+              onClick={() => setActiveChat(null)}
+              className="md:hidden w-11 h-11 flex items-center justify-center text-[var(--glass-text-muted)] hover:text-cyan-400 transition-all cursor-pointer active:scale-90 bg-[var(--glass-bg-hover)] rounded-full border border-[var(--glass-border)]"
+            >
+              <ChevronLeft className="w-7 h-7" />
+            </button>
             
-            <div className="min-w-0">
-              <h3 className="font-semibold text-[13.5px] md:text-sm text-slate-100 truncate leading-tight">{activeChat.title}</h3>
-              {typingUsers.length > 0 ? (
-                <span className="text-[10px] md:text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1 leading-none mt-0.5">
-                  <span className="flex gap-0.5">
-                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-0.5 h-0.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
-                  {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
-                </span>
-              ) : (
-                <span className="text-[10.5px] md:text-[11.5px] text-slate-400 flex items-center gap-1 font-sans mt-0.5 leading-none">
-                  <span className="capitalize text-cyan-400/90 font-medium">
-                    {activeChat.type === 'direct' ? (language === 'ru' ? 'Личный' : 'Direct') : activeChat.type === 'group' ? (language === 'ru' ? 'Группа' : 'Group') : (language === 'ru' ? 'Канал' : 'Channel')}
-                  </span> 
-                  <span>&bull;</span> 
-                  {activeChat.type === 'direct' ? (() => {
-                    const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
-                    const isOnline = partnerId && onlineUsers[partnerId] === 'online';
-                    return (
-                      <span className="flex items-center gap-1 leading-none">
-                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-500'}`} />
-                        <span className={isOnline ? 'text-emerald-450 font-medium' : 'text-slate-400'}>{isOnline ? (language === 'ru' ? 'в сети' : 'online') : (language === 'ru' ? 'не в сети' : 'offline')}</span>
-                      </span>
-                    );
-                  })() : (
-                    <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+            <div 
+              onClick={() => {
+                if (activeChat.type === 'direct') {
+                  const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
+                  const partnerProfile = globalUsers.find(u => u.uid === partnerId);
+                  if (partnerProfile) {
+                    setSelectedUserProfile(partnerProfile);
+                  }
+                } else {
+                  setIsRightPanelOpen(true);
+                }
+              }}
+              className="flex items-center gap-3 md:gap-4 flex-1 min-w-0 cursor-pointer group/profile"
+            >
+              {(() => {
+                const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
+                const isActiveFavorites = activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid;
+                if (isActiveFavorites) {
+                  return (
+                    <div className="w-10 h-10 md:w-13 md:h-13 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center border border-white/20 shadow-lg shrink-0 group-hover/profile:scale-105 transition-transform duration-300">
+                      <Bookmark className="w-5 h-5 md:w-6 h-6 text-white fill-white/20" />
+                    </div>
+                  );
+                }
+                return (
+                  <div className="relative shrink-0 group-hover/profile:scale-105 transition-transform duration-300">
+                    <img 
+                      src={activeChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(activeChat.title)}`} 
+                      alt={activeChat.title} 
+                      className="w-10 h-10 md:w-13 md:h-13 rounded-full object-cover border border-white/20 shadow-lg" 
+                    />
+                    {activeChat.type === 'direct' && !isActiveFavorites && (
+                      <div className={`absolute right-0 bottom-0 w-3.5 h-3.5 rounded-full border-2 border-[#0f0f0f] shadow-lg ${
+                        onlineUsers[activeChat.members.find(m => m !== currentUser?.uid) || ''] === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
+                      }`} />
+                    )}
+                  </div>
+                );
+              })()}
+              
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-[16px] md:text-[19px] text-[var(--glass-text)] truncate leading-tight group-hover/profile:text-cyan-400 transition-colors tracking-tight">
+                  {(() => {
+                    const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
+                    return activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid
+                      ? (language === 'ru' ? 'Избранное' : 'Saved Messages')
+                      : activeChat.title;
+                  })()}
+                </h3>
+                <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                  {typingUsers.length > 0 ? (
+                    <span className="text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1.5 leading-none">
+                      <div className="flex gap-0.5">
+                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1.5 font-medium leading-none truncate opacity-80 uppercase tracking-wider font-mono">
+                      {(() => {
+                        const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
+                        const isActiveFavorites = activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid;
+                        if (isActiveFavorites) {
+                          return (
+                            <>
+                              <span className="text-cyan-400/90">{language === 'ru' ? 'Избранное' : 'Favorites'}</span> 
+                              <span className="text-slate-600">&bull;</span> 
+                              <span className="text-indigo-400/90">{language === 'ru' ? 'Облако' : 'Storage'}</span>
+                            </>
+                          );
+                        }
+                        
+                        if (activeChat.type === 'direct') {
+                          const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
+                          const isOnline = partnerId && onlineUsers[partnerId] === 'online';
+                          return isOnline 
+                            ? <span className="text-emerald-400 font-bold tracking-widest">{language === 'ru' ? 'в сети' : 'online'}</span> 
+                            : <span className="text-slate-500">{language === 'ru' ? 'не в сети' : 'offline'}</span>;
+                        }
+                        
+                        return (
+                          <>
+                            <span className="text-slate-400">{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+                            {(() => {
+                              const chatOnlineCount = activeChat.members?.filter(uid => onlineUsers[uid] === 'online' && uid !== currentUser?.uid).length || 0;
+                              if (chatOnlineCount > 0) {
+                                return (
+                                  <>
+                                    <span className="text-slate-600">&bull;</span>
+                                    <span className="text-emerald-400 font-bold">{chatOnlineCount} {language === 'ru' ? 'онлайн' : 'online'}</span>
+                                  </>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </>
+                        );
+                      })()}
+                    </span>
                   )}
-                </span>
-              )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        // Action bar channels
-        <div className="flex items-center gap-1.5 md:gap-2">
-          {(() => {
-            const scheduledCount = messages.filter(m => m.chatId === activeChat.id && m.scheduledAt && Date.now() < m.scheduledAt && m.senderId === currentUser?.uid).length;
-            if (scheduledCount > 0) {
-              return (
-                <button
+          {/* Action bar channels */}
+          <div className="flex items-center gap-1.5 md:gap-3">
+            {(() => {
+              const scheduledCount = messages.filter(m => m.chatId === activeChat.id && m.scheduledAt && Date.now() < m.scheduledAt && m.senderId === currentUser?.uid).length;
+              if (scheduledCount > 0) {
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setViewScheduledMode(!viewScheduledMode)}
+                    className={`w-9 h-9 md:w-11 md:h-11 rounded-full cursor-pointer transition-all relative flex items-center justify-center ${viewScheduledMode ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-amber-400 hover:text-amber-300 bg-white/5 border border-white/10 shadow-lg'}`}
+                    title={language === 'ru' ? 'Отложенные сообщения' : 'Scheduled Messages'}
+                  >
+                    <Clock className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                    <span className="absolute -top-1 -right-1 bg-amber-500 text-[10px] text-slate-950 font-black rounded-full w-4.5 h-4.5 flex items-center justify-center border-2 border-[#1a1a1a]">
+                      {scheduledCount}
+                    </span>
+                  </button>
+                );
+              }
+              return null;
+            })()}
+
+            <button 
+              type="button"
+              onClick={() => {
+                setShowInChatSearch(!showInChatSearch);
+                if (viewScheduledMode) setViewScheduledMode(false);
+                if (showInChatSearch) setSearchInChatQuery('');
+              }}
+              className={`w-9 h-9 md:w-11 md:h-11 rounded-full cursor-pointer transition-all flex items-center justify-center ${showInChatSearch ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_20px_rgba(34,211,238,0.2)]' : 'text-slate-400 hover:text-slate-200 bg-white/5 border border-white/10 shadow-lg'}`}
+              title={language === 'ru' ? 'Поиск сообщений' : 'Search Message History'}
+            >
+              <Search className="w-5 h-5 md:w-5.5 md:h-5.5" />
+            </button>
+
+            {activeChat.type === 'direct' && (
+              <div className="flex items-center gap-1.5 md:gap-3">
+                <button 
                   type="button"
-                  onClick={() => setViewScheduledMode(!viewScheduledMode)}
-                  className={`p-1.5 rounded-lg cursor-pointer transition-all relative flex items-center ${viewScheduledMode ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-amber-400 hover:text-amber-300 bg-amber-500/10'}`}
-                  title={language === 'ru' ? 'Отложенные сообщения' : 'Scheduled Messages'}
+                  onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'voice')}
+                  className="w-9 h-9 md:w-11 md:h-11 text-slate-400 hover:text-emerald-400 rounded-full cursor-pointer transition bg-white/5 border border-white/10 shadow-lg flex items-center justify-center"
+                  title={language === 'ru' ? 'Голосовой звонок' : 'Initiate Voice Channel'}
                 >
-                  <Clock className="w-4 h-4" />
-                  <span className="absolute -top-1 -right-1 bg-amber-500 text-[9px] text-white font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                    {scheduledCount}
-                  </span>
+                  <Phone className="w-5 h-5 md:w-5.5 md:h-5.5" />
                 </button>
-              );
-            }
-            return null;
-          })()}
-
-          <button 
-            type="button"
-            onClick={() => {
-              setShowInChatSearch(!showInChatSearch);
-              if (viewScheduledMode) setViewScheduledMode(false);
-              if (showInChatSearch) setSearchInChatQuery('');
-            }}
-            className={`p-1.5 rounded-lg cursor-pointer transition-all ${showInChatSearch ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-slate-200'}`}
-            title={language === 'ru' ? 'Поиск сообщений' : 'Search Message History'}
-          >
-            <Search className="w-4 h-4" />
-          </button>
-
-          {activeChat.type === 'direct' && (
-            <>
-              <button 
-                type="button"
-                onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'voice')}
-                className="p-1.5 text-slate-400 hover:text-cyan-400 rounded-lg cursor-pointer transition"
-                title={language === 'ru' ? 'Начать голосовой звонок' : 'Initiate Voice Channel'}
-              >
-                <Phone className="w-4 h-4" />
-              </button>
-              <button 
-                type="button"
-                onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'video')}
-                className="p-1.5 text-slate-400 hover:text-cyan-400 rounded-lg cursor-pointer transition"
-                title={language === 'ru' ? 'Начать видеозвонок' : 'Initiate Secure Video Call'}
-              >
-                <Video className="w-4 h-4" />
-              </button>
-            </>
-          )}
-
-          <button 
-            type="button"
-            onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-            className={`p-1.5 rounded-lg cursor-pointer transition-all ${isRightPanelOpen ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-slate-200'}`}
-            title={language === 'ru' ? 'Информация о чате' : 'Chat & User Metadata'}
-          >
-            <Info className="w-4 h-4" />
-          </button>
+                <button 
+                  type="button"
+                  onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'video')}
+                  className="w-9 h-9 md:w-11 md:h-11 text-slate-400 hover:text-indigo-400 rounded-full cursor-pointer transition bg-white/5 border border-white/10 shadow-lg flex items-center justify-center"
+                  title={language === 'ru' ? 'Видеозвонок' : 'Initiate Secure Video Call'}
+                >
+                  <Video className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Pinned Message Bar */}
+      {activeChat.pinnedMessageId && (
+        <div 
+          onClick={() => {
+            const el = document.getElementById(`msg-${activeChat.pinnedMessageId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('animate-highlight');
+              setTimeout(() => el.classList.remove('animate-highlight'), 2000);
+            }
+          }}
+          className="px-4 md:px-6 py-1.5 bg-[#0a0a0d]/60 backdrop-blur-md border-b border-white/[0.03] flex items-center gap-3 cursor-pointer hover:bg-white/[0.03] transition-all group z-10 shrink-0"
+        >
+          <div className="w-0.5 h-7 bg-cyan-500 rounded-full shrink-0 group-hover:scale-y-110 transition-transform" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-[10px] font-bold text-cyan-400 uppercase tracking-tight leading-none mb-0.5">{language === 'ru' ? 'Закреплённое сообщение' : 'Pinned Message'}</h4>
+            <p className="text-[11.5px] text-slate-300 truncate leading-tight">
+              {(() => {
+                const msg = messages.find(m => m.id === activeChat.pinnedMessageId);
+                if (!msg) return language === 'ru' ? 'Загрузка...' : 'Loading...';
+                if (msg.type === 'text') return msg.text;
+                if (msg.type === 'image') return language === 'ru' ? '🖼️ Фото' : '🖼️ Photo';
+                if (msg.type === 'video') return language === 'ru' ? '📹 Видео' : '📹 Video';
+                if (msg.type === 'voice') return language === 'ru' ? '🎤 Голосовое' : '🎤 Voice Note';
+                if (msg.type === 'sticker') return language === 'ru' ? '✨ Стикер' : '✨ Sticker';
+                return language === 'ru' ? '📎 Файл' : '📎 File';
+              })()}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Pin className="w-3.5 h-3.5 text-slate-500 rotate-45 group-hover:text-cyan-400 transition-colors" />
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                pinMessage(activeChat.id, null);
+              }}
+              className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inline Content Search */}
       {showInChatSearch && (
@@ -1479,27 +1916,28 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
-      {/* Pinned Msg Banner */}
-      {activeChat.pinnedMessageId && (
-        <div className="px-4 md:px-6 py-2 bg-white/[0.02] backdrop-blur-md border-b border-white/[0.05] flex justify-between items-center text-xs text-slate-300 select-none animate-fade-in z-10 shrink-0">
-          <div className="flex items-center gap-3 truncate flex-1 min-w-0 mr-3">
-            <div className="w-0.5 h-8 bg-cyan-500 rounded-full shrink-0" />
-            <Pin className="w-3.5 h-3.5 text-cyan-400 rotate-45 shrink-0" />
-            <div className="truncate cursor-pointer" onClick={() => {
-              const pinnedDiv = document.getElementById(`msg-${activeChat.pinnedMessageId}`);
-              if (pinnedDiv) pinnedDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }}>
-              <span className="font-bold text-[10px] text-cyan-400 block tracking-tight uppercase leading-none">{language === 'ru' ? 'Закреплённое сообщение' : 'Pinned Message'}</span>
-              <span className="text-slate-300 truncate block text-[11.5px] mt-0.5">
-                {messages.find(m => m.id === activeChat.pinnedMessageId)?.text || (language === 'ru' ? 'Вложение' : 'Attachment')}
+
+      {/* Floating utility: Scroll to Bottom button with Unread count if applicable */}
+      <AnimatePresence>
+        {!isAtBottom && paginatedMessages.length > 5 && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.5, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, y: 10 }}
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-24 right-4 md:right-8 z-30 w-11 h-11 bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-full flex items-center justify-center text-slate-300 hover:text-cyan-400 hover:bg-slate-800 shadow-2xl transition-all cursor-pointer group active:scale-90"
+          >
+            <svg className="w-5 h-5 transition-transform group-hover:translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 13l-7 7-7-7m14-8l-7 7-7-7" />
+            </svg>
+            {activeChat.unreadCounts?.[currentUser?.uid || ''] > 0 && (
+              <span className="absolute -top-1.5 -left-1.5 bg-cyan-500 text-[10px] text-slate-950 font-black rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center border-2 border-slate-900 shadow-lg">
+                {activeChat.unreadCounts[currentUser?.uid || '']}
               </span>
-            </div>
-          </div>
-          <button type="button" onClick={() => pinMessage(activeChat.id, null)} className="text-slate-500 hover:text-slate-300 p-1.5 hover:bg-white/5 rounded-full cursor-pointer shrink-0 transition">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Topics tab selector (Forum Mode enabled) */}
       {activeChat.type === 'group' && activeChat.topics && activeChat.topics.length > 0 && (
@@ -1569,37 +2007,89 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
+      {/* Desktop Message Menu Backdrop */}
+      <AnimatePresence>
+        {activeMessageMenuId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="hidden md:block fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[150] transition-opacity"
+            onClick={() => setActiveMessageMenuId(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Message Scrollable Window Stream */}
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative bg-[#07080b] flex flex-col gap-2.5 scroll-smooth custom-scrollbar z-10"
+        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative flex flex-col gap-2.5 scroll-smooth custom-scrollbar z-10 transition-colors duration-350 vision-scroll-area backdrop-blur-sm"
+        style={{ backgroundColor: getWallpaperStyle().backgroundColor.replace('0.8', '0.4') }}
       >
-        {/* Futuristic Glass Ambient Background Wallpaper Overlay */}
-        <div className="absolute inset-0 z-0 opacity-85 pointer-events-none" style={{
-          backgroundImage: `
-            radial-gradient(circle at 50% 120%, rgba(6, 182, 212, 0.12), transparent 70%),
-            radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08), transparent 50%),
-            radial-gradient(circle at 90% 10%, rgba(236, 72, 153, 0.05), transparent 40%)
-          `,
-          backgroundAttachment: 'fixed',
-          pointerEvents: 'none'
-        }} />
+        {/* Spacer for Floating Header */}
+        <div className="h-[96px] md:h-[108px] shrink-0" />
+        
+        {/* Simple Wallpaper Overlay */}
+        <div 
+          className="absolute inset-0 z-0 opacity-40 pointer-events-none transition-all duration-350 overflow-hidden" 
+          style={{ ...getWallpaperStyle(), pointerEvents: 'none' }}
+        />
         
         {visibleMessages.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none max-w-sm mx-auto my-auto py-16 relative z-10">
-            <div className="px-6 py-8 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md shadow-2xl flex flex-col items-center max-w-xs">
-              <div className="p-4 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 mb-4 animate-pulse">
-                <MessageSquare className="w-8 h-8" />
-              </div>
-              <h4 className="text-sm font-bold text-slate-100 tracking-tight mb-2">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none max-w-sm mx-auto my-auto py-16 relative z-10"
+          >
+            <div className="px-7 py-9 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md shadow-[0_15px_40px_-5px_rgba(0,0,0,0.4)] flex flex-col items-center max-w-xs relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
+              
+              {/* Premium Floating Sphere with interactive orbit feel */}
+              <motion.div 
+                animate={{ y: [0, -10, 0] }} 
+                transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut" }} 
+                className="relative w-20 h-20 mb-6 flex items-center justify-center shrink-0"
+              >
+                {/* Pulsing glow shadow below sphere */}
+                <motion.div 
+                  animate={{ scale: [1, 0.85, 1], opacity: [0.6, 0.3, 0.6] }} 
+                  transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut" }} 
+                  className="absolute -bottom-2 w-12 h-2 bg-cyan-500/20 rounded-full blur-md" 
+                />
+                
+                {/* Main Orb with heavy backdrop-blur */}
+                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-500/20 via-sky-400/5 to-transparent border border-cyan-400/30 backdrop-blur-xl shadow-[inset_0_4px_12px_rgba(255,255,255,0.15),0_8px_25px_rgba(34,211,238,0.15)] flex items-center justify-center">
+                  <MessageSquare className="w-8 h-8 text-cyan-400 drop-shadow-[0_2px_8px_rgba(6,182,212,0.5)]" />
+                </div>
+                
+                {/* Orbit sparks & encryption locks */}
+                <motion.div 
+                  animate={{ y: [-3, 3, -3], x: [3, -3, 3] }} 
+                  transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }} 
+                  className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-slate-900/90 border border-white/10 shadow-lg flex items-center justify-center text-[10px] backdrop-blur-sm"
+                >
+                  ✨
+                </motion.div>
+                
+                <motion.div 
+                  animate={{ y: [3, -3, 3], x: [-3, 3, -3] }} 
+                  transition={{ repeat: Infinity, duration: 3.6, ease: "easeInOut" }} 
+                  className="absolute -bottom-0.5 -left-1 w-5.5 h-5.5 rounded-full bg-slate-900/95 border border-cyan-500/20 shadow-lg flex items-center justify-center text-[9px] backdrop-blur-sm"
+                >
+                  🔒
+                </motion.div>
+              </motion.div>
+
+              <h4 className="text-[13.5px] font-bold text-slate-100 tracking-tight mb-2.5 font-sans">
                 {language === 'ru' ? 'Здесь пока пусто...' : 'No messages here yet'}
               </h4>
-              <p className="text-xs text-slate-400 leading-relaxed font-sans">
+              <p className="text-[11.5px] text-slate-400 leading-relaxed font-sans px-1">
                 {language === 'ru' ? 'Сообщения зашифрованы и защищены. Начните писать в поле ниже!' : 'All messages are fully encrypted. Start the conversation by sending a direct note below!'}
               </p>
             </div>
-          </div>
+          </motion.div>
         ) : (
           (() => {
             const elements: React.ReactNode[] = [];
@@ -1639,16 +2129,26 @@ export const ChatWindow: React.FC = () => {
 
               const isMe = msg.senderId === currentUser?.uid;
               const isRead = msg.readBy && msg.readBy.length > 1;
+              const isCircularVideo = msg.type === 'video' && (msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note'));
 
               // 2. Continuous message grouping by the same user within 3 mins (Telegram style clustering)
               const prevMsg = paginatedMessages[idx - 1];
-              const isConsecutive = prevMsg && prevMsg.senderId === msg.senderId && (msg.createdAt - prevMsg.createdAt < 3 * 60 * 1000);
+              const nextMsg = paginatedMessages[idx + 1];
+              const isConsecutivePrev = prevMsg && prevMsg.senderId === msg.senderId && (msg.createdAt - prevMsg.createdAt < 3 * 60 * 1000);
+              const isConsecutiveNext = nextMsg && nextMsg.senderId === msg.senderId && (nextMsg.createdAt - msg.createdAt < 3 * 60 * 1000);
+
+              const tr = isConsecutivePrev ? 'rounded-tr-md' : 'rounded-tr-2xl';
+              const br = isConsecutiveNext ? 'rounded-br-md' : 'rounded-br-[2px]';
+              const tl = isConsecutivePrev ? 'rounded-tl-md' : 'rounded-tl-2xl';
+              const bl = isConsecutiveNext ? 'rounded-bl-md' : 'rounded-bl-[2px]';
+              
+              const bubbleRadius = isMe ? `rounded-2xl ${tr} ${br}` : `rounded-2xl ${tl} ${bl}`;
 
               elements.push(
                 <motion.div 
                   key={msg.id}
                   id={`msg-${msg.id}`}
-                  className={`flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutive ? 'mt-0.5' : 'mt-2'} relative`}
+                  className={`message-swipe-container flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutivePrev ? 'mt-0.5' : 'mt-2'} relative ${activeMessageMenuId === msg.id ? 'z-[160]' : 'z-10'}`}
                   initial={{ opacity: 0, y: 12, scale: 0.99 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ 
@@ -1661,36 +2161,75 @@ export const ChatWindow: React.FC = () => {
                   drag="x"
                   dragDirectionLock
                   dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={{ left: 0.15, right: 0.15 }}
+                  dragElastic={{ left: 0.22, right: 0.22 }}
+                  style={{ willChange: 'transform, opacity' }}
                   onDrag={(e, info) => {
-                    const iconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
-                    const icon = document.getElementById(iconId);
-                    if (icon) {
-                      const swipeDist = isMe ? info.offset.x : -info.offset.x;
-                      if (swipeDist < 0) {
-                        const progress = Math.min(Math.abs(swipeDist) / 40, 1);
-                        icon.style.opacity = progress.toString();
-                        icon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
-                        if (progress === 1 && icon.dataset.vibrated !== 'true') {
+                    const replyIconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
+                    const likeIconId = isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`;
+                    const replyIcon = document.getElementById(replyIconId);
+                    const likeIcon = document.getElementById(likeIconId);
+                    const swipeDist = isMe ? info.offset.x : -info.offset.x;
+
+                    if (swipeDist < 0) {
+                      if (replyIcon) {
+                        const progress = Math.min(Math.abs(swipeDist) / 45, 1);
+                        replyIcon.style.opacity = progress.toString();
+                        replyIcon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
+                        if (progress === 1 && replyIcon.dataset.vibrated !== 'true') {
                           if ('vibrate' in navigator) navigator.vibrate(10);
-                          icon.dataset.vibrated = 'true';
+                          replyIcon.dataset.vibrated = 'true';
                         } else if (progress < 1) {
-                          icon.dataset.vibrated = 'false';
+                          replyIcon.dataset.vibrated = 'false';
                         }
+                      }
+                      if (likeIcon) {
+                        likeIcon.style.opacity = '0';
+                        likeIcon.style.transform = 'translateY(-50%) scale(0.5)';
+                      }
+                    } else if (swipeDist > 0) {
+                      if (likeIcon) {
+                        const progress = Math.min(Math.abs(swipeDist) / 45, 1);
+                        likeIcon.style.opacity = progress.toString();
+                        likeIcon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
+                        if (progress === 1 && likeIcon.dataset.vibrated !== 'true') {
+                          if ('vibrate' in navigator) navigator.vibrate(10);
+                          likeIcon.dataset.vibrated = 'true';
+                        } else if (progress < 1) {
+                          likeIcon.dataset.vibrated = 'false';
+                        }
+                      }
+                      if (replyIcon) {
+                        replyIcon.style.opacity = '0';
+                        replyIcon.style.transform = 'translateY(-50%) scale(0.5)';
                       }
                     }
                   }}
                   onDragEnd={(e, info) => {
-                    const iconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
-                    const icon = document.getElementById(iconId);
-                    if (icon) {
-                      icon.style.opacity = '0';
-                      icon.style.transform = 'translateY(-50%) scale(0.5)';
-                      icon.dataset.vibrated = 'false';
+                    const replyIconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
+                    const likeIconId = isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`;
+                    const replyIcon = document.getElementById(replyIconId);
+                    const likeIcon = document.getElementById(likeIconId);
+
+                    if (replyIcon) {
+                      replyIcon.style.opacity = '0';
+                      replyIcon.style.transform = 'translateY(-50%) scale(0.5)';
+                      replyIcon.dataset.vibrated = 'false';
                     }
+                    if (likeIcon) {
+                      likeIcon.style.opacity = '0';
+                      likeIcon.style.transform = 'translateY(-50%) scale(0.5)';
+                      likeIcon.dataset.vibrated = 'false';
+                    }
+
                     const swipeDist = isMe ? info.offset.x : -info.offset.x;
-                    if (swipeDist < -40) {
+                    if (swipeDist < -45) {
                       setReplyTarget(msg);
+                    } else if (swipeDist > 45) {
+                      addMessageReaction(msg.id, '👍');
+                      const clientX = (e as any).clientX || (e as any).changedTouches?.[0]?.clientX || window.innerWidth / 2;
+                      const clientY = (e as any).clientY || (e as any).changedTouches?.[0]?.clientY || window.innerHeight / 2;
+                      triggerFloatHeart(clientX, clientY);
+                      if ('vibrate' in navigator) navigator.vibrate([15, 30]);
                     }
                   }}
                   onTouchStart={(e) => {
@@ -1721,6 +2260,10 @@ export const ChatWindow: React.FC = () => {
                   <div className={`absolute ${isMe ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 text-slate-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none transition-none`} id={isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`}>
                      <Reply className={`w-3.5 h-3.5 ${isMe ? 'scale-x-[-1]' : ''}`} />
                   </div>
+                  {/* Thumbs up like reaction swipe indicator on the other side */}
+                  <div className={`absolute ${isMe ? '-right-8' : '-left-8'} top-1/2 -translate-y-1/2 opacity-0 text-amber-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none transition-none`} id={isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`}>
+                     <ThumbsUp className="w-3.5 h-3.5" />
+                  </div>
                   {/* Left Avatar for other users (Hidden on consecutive piles) */}
                   {!isMe && (
                     <div 
@@ -1739,9 +2282,9 @@ export const ChatWindow: React.FC = () => {
                           } as any);
                         }
                       }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0 ${!isConsecutive ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0 ${!isConsecutivePrev ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                     >
-                      {!isConsecutive ? (
+                      {!isConsecutivePrev ? (
                         <img src={msg.senderPhotoURL || undefined} alt={msg.senderName} className="w-full h-full object-cover border border-slate-900 shadow" />
                       ) : (
                         <div className="w-full h-full" />
@@ -1752,10 +2295,20 @@ export const ChatWindow: React.FC = () => {
                   {/* Message Core Box Stack */}
                   <div className={`flex flex-col gap-0.5 group relative ${isMe ? 'items-end' : 'items-start'}`}>
                     {/* Compact sender title display for non-me on starting bundle */}
-                    {!isMe && !isConsecutive && (
+                    {!isMe && !isConsecutivePrev && (
                       <span className="text-[10px] md:text-[11px] font-bold text-cyan-400 pl-1 mb-0.5 font-sans leading-none">
                         {msg.senderName}
                       </span>
+                    )}
+
+                    {/* Forwarded from info */}
+                    {msg.forwardFrom && (
+                      <div className={`flex items-center gap-1 mb-0.5 opacity-60 ${isMe ? 'flex-row-reverse' : ''}`}>
+                        <Forward className="w-2.5 h-2.5" />
+                        <span className="text-[9px] font-mono uppercase tracking-tight">
+                          {language === 'ru' ? 'Переслано от ' : 'Forwarded from '} {msg.forwardFrom.senderName}
+                        </span>
+                      </div>
                     )}
 
                     {/* Highly stylized bubble with tail margins */}
@@ -1773,21 +2326,49 @@ export const ChatWindow: React.FC = () => {
                       onPointerUp={(e) => {
                          const target = e.currentTarget;
                          clearTimeout(parseInt(target.dataset.timeoutId || '0'));
+                         
+                         const pendingSingleTap = target.dataset.singleTapTimer;
+                         if (pendingSingleTap) {
+                           clearTimeout(parseInt(pendingSingleTap));
+                           target.dataset.singleTapTimer = '';
+                         }
+
                          if (target.dataset.longPressTriggered !== 'true') {
-                            setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id);
+                           const now = Date.now();
+                           const lastTap = parseInt(target.dataset.lastTap || '0');
+                           if (now - lastTap < 300) {
+                             // It's a double tap! React with Heart dynamically
+                             e.stopPropagation();
+                             addMessageReaction(msg.id, '❤️');
+                             triggerFloatHeart(e.clientX, e.clientY);
+                             if ('vibrate' in navigator) navigator.vibrate([15, 30]);
+                             setActiveMessageMenuId(null);
+                             target.dataset.lastTap = '0'; // reset
+                           } else {
+                             // Single tap: queue the menu toggle safely
+                             const singlePlay = setTimeout(() => {
+                               setActiveMessageMenuId(prev => prev === msg.id ? null : msg.id);
+                             }, 200);
+                             target.dataset.singleTapTimer = singlePlay.toString();
+                             target.dataset.lastTap = now.toString();
+                           }
                          }
                       }}
                       onPointerCancel={(e) => {
                          const target = e.currentTarget;
                          clearTimeout(parseInt(target.dataset.timeoutId || '0'));
+                         const pendingSingleTap = target.dataset.singleTapTimer;
+                         if (pendingSingleTap) {
+                           clearTimeout(parseInt(pendingSingleTap));
+                         }
                       }}
-                      className={`relative rounded-2xl py-1.5 px-3 md:py-2 md:px-3.5 border transition-colors ${
-                        msg.type === 'sticker' 
-                          ? 'border-transparent bg-transparent py-0 px-0 shadow-none' 
+                      className={`message-bubble relative transition-all duration-300 backdrop-blur-xl min-w-[80px] ${
+                        msg.type === 'sticker' || isCircularVideo
+                          ? 'border-transparent bg-transparent p-0 shadow-none backdrop-blur-none' 
                           : isMe 
-                            ? 'glass-bubble-out glass-highlight rounded-tr-sm shadow-sm font-sans' 
-                            : 'glass-bubble-in rounded-tl-sm shadow-sm font-sans'
-                      } ${activeMessageMenuId === msg.id ? 'ring-2 ring-cyan-500/50' : ''}`}
+                            ? `py-1.5 px-3 border border-white/20 glass-bubble-out shadow-[0_5px_15px_rgba(0,122,255,0.1)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-out' : ''}` 
+                            : `py-1.5 px-3 border border-white/10 glass-bubble-in shadow-[0_5px_15px_rgba(0,0,0,0.05)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-in' : ''}`
+                      } ${activeMessageMenuId === msg.id ? 'ring-2 ring-white/40 scale-[1.02] shadow-[0_0_60px_rgba(255,255,255,0.15)]' : ''}`}
                     >
                       {/* Reply To info block */}
                       {msg.replyTo && (
@@ -1818,10 +2399,11 @@ export const ChatWindow: React.FC = () => {
 
                       {msg.type === 'image' && (
                         <div 
-                          className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs border border-slate-900/60 bg-black/55 cursor-pointer hover:opacity-95 transition"
+                          className="mb-2.5 rounded-2xl overflow-hidden shadow-2xl max-w-xs border border-white/10 bg-black/40 cursor-pointer hover:opacity-95 transition-all active:scale-[0.98] relative group"
                           onClick={() => setSelectedImage(msg.fileUrl || null)}
                         >
                           <img src={msg.fileUrl || undefined} alt="Visual content upload" className="w-full h-auto object-cover max-h-[220px]" />
+                          <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         </div>
                       )}
 
@@ -1832,7 +2414,7 @@ export const ChatWindow: React.FC = () => {
                             return <CircularVideoNote src={msg.fileUrl || ''} />;
                           }
                           return (
-                            <div className="mb-2.5 rounded-xl overflow-hidden shadow-xl max-w-xs bg-black">
+                            <div className="mb-2.5 rounded-2xl overflow-hidden shadow-2xl max-w-xs bg-black border border-white/10 relative group">
                               <video src={msg.fileUrl || undefined} controls className="w-full h-auto" />
                             </div>
                           );
@@ -1905,19 +2487,21 @@ export const ChatWindow: React.FC = () => {
 
                       {/* Central raw formatted message texts */}
                       {msg.type !== 'sticker' && msg.type !== 'poll' && (
-                        <>
-                          <p className="text-[13px] md:text-sm leading-relaxed whitespace-pre-wrap select-text break-words pr-2">
+                        <div className="flex flex-col">
+                          <div className={`text-[14.5px] leading-relaxed whitespace-pre-wrap select-text break-words pr-1 ${isMe ? 'text-[var(--glass-bubble-out-text)]' : 'text-[var(--glass-bubble-in-text)]'}`}>
                             {formatMarkdownText(msg.text)}
-                          </p>
+                          </div>
                           <LinkPreview text={msg.text} />
-                        </>
+                        </div>
                       )}
 
                       {/* Small visual anchor footer of state, ticks and date */}
-                      <div className={`flex justify-end items-center gap-1 mt-1 select-none text-[9px] text-slate-500/80 float-right ml-2.5 ${
+                      <div className={`flex items-center justify-end gap-1 mt-1 select-none text-[10.5px] relative z-10 ${
                         msg.type === 'sticker' 
-                          ? 'bg-black/75 px-1.5 py-0.5 rounded-full border border-slate-900 text-[9px] w-fit ml-auto shadow-md mt-1' 
-                          : ''
+                          ? 'bg-black/60 px-2 py-0.5 rounded-full w-fit ml-auto shadow-md text-white' 
+                          : isCircularVideo
+                            ? 'absolute bottom-1.5 right-2 z-[25] bg-black/50 px-2 py-0.5 rounded-full shadow-lg backdrop-blur-sm text-white'
+                            : isMe ? 'text-[var(--glass-bubble-out-text)] opacity-80' : 'text-[var(--glass-text-muted)]'
                       }`}>
                         {msg.silent && (
                           <span className="text-[10px]" title="Silent message">🔕</span>
@@ -1925,27 +2509,32 @@ export const ChatWindow: React.FC = () => {
                         
                         {msg.editHistory && msg.editHistory.length > 0 && (
                           <span 
-                            className="text-[8px] text-cyan-400/80 font-medium font-mono lowercase scale-90"
+                            className="text-[9px] font-medium scale-90"
                             title="Message edited"
                           >
                             {language === 'ru' ? 'изм.' : 'edited'}
                           </span>
                         )}
                         
-                        <span className="text-[9px] font-mono text-slate-500/80 tracking-tight">
+                        {activeChat?.pinnedMessageId === msg.id && (
+                          <Pin className="w-2.5 h-2.5 text-cyan-400 rotate-45 shrink-0" />
+                        )}
+
+                        <span className="text-[10px] font-sans tracking-tight">
                           {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         
                         {isMe && (
-                          <span className="shrink-0">
+                          <span className="shrink-0 flex items-center">
                             {msg.status === 'sending' ? (
-                              <div className="w-2.5 h-2.5 rounded-full border border-slate-500 border-t-transparent animate-spin ml-0.5" />
+                              <div className="w-2.5 h-2.5 rounded-full border border-white/50 border-t-transparent animate-spin ml-0.5" />
                             ) : isRead ? (
-                              <CheckCheck className="w-3 h-3 text-cyan-400" />
-                            ) : msg.status === 'delivered' ? (
-                              <CheckCheck className="w-3 h-3 text-slate-500" />
+                              <div className="flex -space-x-1.5">
+                                <Check className="w-3.5 h-3.5 text-white" />
+                                <Check className="w-3.5 h-3.5 text-white" />
+                              </div>
                             ) : (
-                              <Check className="w-3 h-3 text-slate-500" />
+                              <Check className="w-3.5 h-3.5 text-white/70" />
                             )}
                           </span>
                         )}
@@ -1953,36 +2542,89 @@ export const ChatWindow: React.FC = () => {
 
                       {/* Reactions display badges under bubble */}
                       {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                        <div className="absolute -bottom-2 right-2 flex items-center gap-1 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded-full text-[10px] shadow select-none leading-none z-10 scale-95">
-                          {Object.values(msg.reactions).map((emoji, idx) => (
-                            <span key={idx}>{emoji}</span>
+                        <div className={`absolute -bottom-2 ${isMe ? 'right-2 flex-row-reverse' : 'left-2'} flex items-center gap-1 z-10 scale-95`}>
+                          {Object.entries(
+                            Object.values(msg.reactions).reduce((acc: any, emoji) => {
+                              acc[emoji] = (acc[emoji] || 0) + 1;
+                              return acc;
+                            }, {})
+                          ).map(([emoji, count]: any) => (
+                            <button
+                              key={emoji}
+                              onClick={() => addMessageReaction(msg.id, emoji)}
+                              className={`flex items-center gap-1 bg-slate-900/95 border px-2 py-0.5 rounded-full text-[10px] shadow-lg select-none leading-none hover:scale-110 transition-all cursor-pointer ${
+                                Object.entries(msg.reactions || {}).some(([uid, e]) => uid === currentUser?.uid && e === emoji)
+                                  ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200'
+                                  : 'border-white/5 text-slate-300'
+                              }`}
+                            >
+                              <span>{emoji}</span>
+                              {count > 1 && <span className="font-bold opacity-80">{count}</span>}
+                            </button>
                           ))}
                         </div>
                       )}
                     </div>
 
                     {/* Inline Actions hovering toolbar on Desktop or Active on Mobile */}
-                    <div className={`items-center gap-1.5 bg-slate-950 border border-slate-850 px-2 py-1 rounded-xl shadow-2xl absolute -top-8 right-2.5 z-[100] scale-90 select-none transition-all duration-200 ${activeMessageMenuId === msg.id ? 'flex' : 'hidden md:group-hover:flex'}`}>
-                      <button type="button" onClick={() => { setReplyTarget(msg); setActiveMessageMenuId(null); }} title="Reply" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Reply className="w-3.5 h-3.5" /></button>
-                      <button type="button" onClick={() => { pinMessage(activeChat.id, msg.id); setActiveMessageMenuId(null); }} title="Pin" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Pin className="w-3.5 h-3.5" /></button>
+                    <div className={`items-center gap-1 vision-context-menu px-2 py-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.4)] absolute -top-12 right-2.5 z-[100] scale-95 hover:scale-100 select-none transition-all duration-300 ${activeMessageMenuId === msg.id ? 'flex ring-2 ring-cyan-500/40 shadow-[0_0_30px_rgba(34,211,238,0.3)]' : 'hidden md:group-hover:flex'}`}>
+                      {/* Popular emojis quick picker */}
+                      <div className="flex gap-0.5 mr-2 pr-2 border-r border-white/10 overflow-x-auto max-w-[120px] no-scrollbar">
+                        {['👍', '❤️', '😂', '🔥', '😮'].map(emoji => (
+                          <button 
+                            key={emoji}
+                            onClick={() => {
+                              addMessageReaction(msg.id, emoji);
+                              if (activeMessageMenuId) setActiveMessageMenuId(null);
+                            }}
+                            className="p-1 hover:bg-white/10 rounded-md text-[13px] transition active:scale-125 cursor-pointer"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => { setReplyTarget(msg); setActiveMessageMenuId(null); }} title="Reply" className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Reply className="w-3.5 h-3.5" /></button>
+                      <button type="button" onClick={() => { setForwardingMessage(msg); setActiveMessageMenuId(null); }} title="Forward" className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Forward className="w-3.5 h-3.5" /></button>
+                      <button 
+                        type="button" 
+                        onClick={() => { 
+                          if (activeChat.pinnedMessageId === msg.id) {
+                            pinMessage(activeChat.id, null);
+                          } else {
+                            pinMessage(activeChat.id, msg.id);
+                          }
+                          setActiveMessageMenuId(null); 
+                        }} 
+                        title={activeChat.pinnedMessageId === msg.id ? (language === 'ru' ? "Открепить" : "Unpin") : (language === 'ru' ? "Закрепить" : "Pin")} 
+                        className={`cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90 ${activeChat.pinnedMessageId === msg.id ? 'text-cyan-400 bg-cyan-500/10' : 'text-slate-400 hover:text-cyan-400'}`}
+                      >
+                        <Pin className="w-3.5 h-3.5" />
+                      </button>
                       {isMe && (
                         <>
-                          <button type="button" onClick={() => { setEditTarget(msg); setInputText(msg.text); setActiveMessageMenuId(null); }} title="Edit" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Edit2 className="w-3.5 h-3.5" /></button>
-                          <button type="button" onClick={() => { deleteMessage(msg.id); setActiveMessageMenuId(null); }} title="Delete" className="hover:text-red-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => { setEditTarget(msg); setInputText(msg.text); setActiveMessageMenuId(null); }} title="Edit" className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => { deleteMessage(msg.id); setActiveMessageMenuId(null); }} title="Delete" className="text-slate-400 hover:text-red-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Trash2 className="w-3.5 h-3.5" /></button>
                         </>
                       )}
-                      <button type="button" onClick={() => { triggerCopyAction(msg.text); setActiveMessageMenuId(null); }} title="Copy" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Copy className="w-3.5 h-3.5" /></button>
-                      <button type="button" onClick={() => { 
-                        // Forward logic: We can copy the message content natively or push to a forward state
-                        // Here we just prepare the text with a forward prefix for now to not build a full forward modal
-                        setInputText(`[Forwarded from ${msg.senderName}]:\n${msg.text}`); 
-                        setActiveMessageMenuId(null);
-                      }} title="Forward" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Forward className="w-3.5 h-3.5" /></button>
+                      <button type="button" onClick={() => { triggerCopyAction(msg.text); setActiveMessageMenuId(null); }} title="Copy" className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Copy className="w-3.5 h-3.5" /></button>
+                      <button 
+                        type="button" 
+                        onClick={() => { 
+                          setForwardingMessage(msg); 
+                          setActiveMessageMenuId(null); 
+                        }} 
+                        title={language === 'ru' ? 'Переслать' : 'Forward'} 
+                        className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"
+                      >
+                        <Forward className="w-3.5 h-3.5" />
+                      </button>
                       <button type="button" onClick={() => { 
                         saveMessageToFavorites(msg);
                         setActiveMessageMenuId(null);
-                      }} title="Save to Favorites" className="hover:text-cyan-400 cursor-pointer p-0.5 rounded hover:bg-slate-900"><Bookmark className="w-3.5 h-3.5" /></button>
+                      }} title="Save to Favorites" className="text-slate-400 hover:text-cyan-400 cursor-pointer p-1 rounded-lg hover:bg-white/10 transition active:scale-90"><Bookmark className="w-3.5 h-3.5" /></button>
                       
+                      <div className="w-px h-4 bg-white/10 mx-1 shrink-0" />
+
                       {/* Emoji fast reply overlays */}
                       {['❤️', '🔥', '👍', '😂'].map((emoji) => (
                         <button 
@@ -1992,7 +2634,7 @@ export const ChatWindow: React.FC = () => {
                             addMessageReaction(msg.id, emoji);
                             setActiveMessageMenuId(null);
                           }}
-                          className="hover:scale-125 transition text-xs cursor-pointer px-0.5"
+                          className="hover:scale-130 active:scale-90 transition-all text-[13px] cursor-pointer px-1 py-0.5 rounded-md hover:bg-white/10"
                         >
                           {emoji}
                         </button>
@@ -2023,14 +2665,14 @@ export const ChatWindow: React.FC = () => {
         ))}
 
         {typingUsers.length > 0 && (
-          <div className="flex items-center gap-2 px-4 py-2.5 mt-1 text-xs text-slate-400 bg-white/[0.03] border border-white/5 rounded-2xl w-fit backdrop-blur-md animate-fade-in-up font-sans relative z-10 select-none">
-            <span className="flex gap-1 items-center h-2">
-              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="flex items-center gap-2.5 px-3.5 py-2 mt-1 bg-cyan-950/20 hover:bg-cyan-950/35 border border-cyan-500/20 text-cyan-400 rounded-2xl w-fit backdrop-blur-md shadow-[0_0_15px_rgba(6,182,212,0.06)] animate-fade-in-up font-sans relative z-10 select-none">
+            <span className="flex gap-1 items-center h-2 shrink-0">
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce shadow-[0_0_8px_rgba(34,211,238,0.85)]" style={{ animationDuration: '800ms', animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce shadow-[0_0_8px_rgba(34,211,238,0.85)]" style={{ animationDuration: '800ms', animationDelay: '180ms' }} />
+              <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce shadow-[0_0_8px_rgba(34,211,238,0.85)]" style={{ animationDuration: '800ms', animationDelay: '360ms' }} />
             </span>
-            <span className="text-[11px] leading-none text-slate-300">
-              {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
+            <span className="text-[11px] leading-none text-slate-300 font-medium">
+              <strong className="text-cyan-400 font-bold">{typingUsers.join(', ')}</strong> {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
             </span>
           </div>
         )}
@@ -2063,58 +2705,136 @@ export const ChatWindow: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Floating live circular camera preview for video note capturing */}
+      {/* Premium circular camera preview for video note capturing, mirroring high-end messenger apps */}
       <AnimatePresence>
         {isRecordingVideo && (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            className="absolute top-20 left-12 md:left-[35%] z-[100] p-3 rounded-3xl bg-slate-950/95 border border-cyan-500/25 shadow-2xl flex flex-col items-center select-none"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[250] bg-slate-950/85 backdrop-blur-xl flex flex-col justify-between items-center py-10 px-6 select-none"
           >
-            {/* Round display frame */}
-            <div className="w-36 h-36 md:w-44 md:h-44 rounded-full overflow-hidden border border-cyan-400 relative bg-black shadow-inner">
+            {/* Header description of active mode */}
+            <div className="flex flex-col items-center mt-6 text-center">
+              <span className="text-[10px] uppercase tracking-widest text-[#9d7cf6] font-extrabold">
+                {language === 'ru' ? 'Запись видеосообщения' : 'Recording Video Note'}
+              </span>
+              <span className="text-xs text-slate-450 mt-1 md:mt-1.5 px-4 font-medium max-w-sm">
+                {videoRecordingState === 'holding' 
+                  ? (language === 'ru' ? 'Проведите пальцем вверх для фиксации режима записи' : 'Slide finger up to lock the recording mode') 
+                  : (language === 'ru' ? 'Запись активна в фоновом режиме' : 'Video note recording is active')}
+              </span>
+            </div>
+
+            {/* Giant Centered Circle visualizer wrapper */}
+            <div className="relative w-72 h-72 sm:w-80 sm:h-80 md:w-[350px] md:h-[350px] rounded-full overflow-hidden border-[6px] border-white/5 bg-slate-900 shadow-[0_0_60px_rgba(0,0,0,0.85)] flex items-center justify-center transition-all duration-300">
               <video 
                 ref={videoPreviewRef} 
                 autoPlay 
                 muted 
                 playsInline 
-                className="w-full h-full object-cover rounded-full" 
+                className="w-full h-full object-cover rounded-full transition-transform duration-100 ease-out" 
+                style={{
+                  transform: `${videoFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)'} scale(${videoZoom})`,
+                }}
               />
-              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 bg-rose-600 px-3 py-1 rounded-full text-[9px] font-mono text-white animate-pulse flex items-center gap-1.5 tracking-wider font-extrabold shadow uppercase pb-0.5">
-                <span className="w-1.5 h-1.5 bg-white rounded-full" />
-                {recordVideoDuration}s
-              </div>
+              
+              {/* Dynamic circular loader spinner when web camera stream object is not yet live */}
+              {!isVideoStreamReady && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 text-slate-400 bg-slate-900 rounded-full">
+                  <Loader2 className="w-9 h-9 animate-spin text-[#9d7cf6]" />
+                  <span className="text-xs font-semibold">{language === 'ru' ? 'Подключение...' : 'Connecting camera...'}</span>
+                </div>
+              )}
+
+              {/* Animated Progress Ring indicating active recording time (up to 60 seconds max) */}
+              <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none select-none scale-[1.01]" viewBox="0 0 100 100">
+                <circle 
+                  cx="50" 
+                  cy="50" 
+                  r="48.5" 
+                  stroke="rgba(255,255,255,0.06)" 
+                  strokeWidth="1.2" 
+                  fill="transparent" 
+                />
+                <circle 
+                  cx="50" 
+                  cy="50" 
+                  r="48.5" 
+                  stroke="#9d7cf6" 
+                  strokeWidth="1.5" 
+                  fill="transparent" 
+                  strokeDasharray={2 * Math.PI * 48.5}
+                  strokeDashoffset={2 * Math.PI * 48.5 * (1 - (recordVideoMs / 60000))}
+                  className="transition-all duration-100 ease-linear"
+                />
+              </svg>
             </div>
 
-            {videoRecordingState === 'locked' && (
-              <div className="flex items-center gap-3 mt-3 w-full justify-center">
-                <button 
-                  type="button"
-                  onClick={cancelVideoRecording}
-                  className="px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-rose-450 hover:text-rose-400 text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-all text-center leading-none"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  {language === 'ru' ? 'Отмена' : 'Cancel'}
-                </button>
+            {/* Control Layout at the bottom viewport boundary */}
+            <div className="flex flex-col items-center gap-6 w-full max-w-md mb-6 z-30">
+              {/* Duration Timer Badge & Cancel Trigger Pill */}
+              <div className="flex items-center justify-between gap-10 px-6 py-3.5 bg-[#121214]/90 border border-white/5 shadow-2.5xl backdrop-blur-md rounded-full text-sm font-semibold select-none min-w-[270px]">
+                <div className="flex items-center gap-2.5 pl-1">
+                  <span className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping shrink-0" />
+                  <span className="w-2.5 h-2.5 bg-rose-500 rounded-full absolute shrink-0" />
+                  <span className="font-mono tracking-wider font-extrabold text-white pl-1.5 text-base">
+                    {formatVideoDuration(recordVideoMs)}
+                  </span>
+                </div>
                 
+                <button 
+                  type="button" 
+                  onClick={cancelVideoRecording}
+                  className="text-rose-400 hover:text-rose-350 pr-1 uppercase tracking-widest text-[11px] font-black cursor-pointer transition-all hover:scale-105 active:scale-95 select-none"
+                >
+                  {language === 'ru' ? 'ОТМЕНА' : 'CANCEL'}
+                </button>
+              </div>
+
+              {/* Utility actions group (camera direction switcher, device torch flash, and circular send trigger button) */}
+              <div className="flex justify-between items-center w-full px-8">
+                {/* Advanced Quick-toggles (Direction Swap + Camera Flash) */}
+                <div className="flex items-center gap-3 bg-[#121214]/90 border border-white/5 p-1.5 rounded-full shadow-xl">
+                  <button
+                    type="button"
+                    onClick={flipVideoCamera}
+                    className="p-3 bg-white/[0.03] hover:bg-white/[0.08] active:scale-90 rounded-full text-slate-350 hover:text-white transition-all cursor-pointer"
+                    title={language === 'ru' ? 'Сменить направление камеры' : 'Flip camera orientation'}
+                  >
+                    <RefreshCw className="w-5 h-5 text-slate-300" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={toggleFlash}
+                    className={`p-3 bg-white/[0.03] hover:bg-white/[0.08] active:scale-90 rounded-full transition-all cursor-pointer ${
+                      isFlashOn ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] bg-amber-500/10' : 'text-slate-350 hover:text-white'
+                    }`}
+                    title={language === 'ru' ? 'Включить вспышку' : 'Toggle camera torch state'}
+                  >
+                    <Zap className={`w-5 h-5 ${isFlashOn ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+                  </button>
+                </div>
+
+                {/* Instant submission Action Button */}
                 <button 
                   type="button"
                   onClick={stopVideoRecording}
-                  className="px-4 py-1.5 rounded-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 text-xs font-extrabold cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/10 transition-all leading-none"
+                  className="w-14 h-14 rounded-full bg-[#9d7cf6] hover:bg-[#a586fb] text-white flex items-center justify-center shadow-[0_4px_24px_rgba(157,124,246,0.35)] transition-all transform hover:scale-110 active:scale-95 cursor-pointer"
+                  title={language === 'ru' ? 'Завершить и отправить видеосообщение' : 'Submit active circular video note'}
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  {language === 'ru' ? 'Снять и отправить' : 'Send video note'}
+                  <Send className="w-5.5 h-5.5 text-white translate-x-[1px]" />
                 </button>
               </div>
-            )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Reply or Editing bar notification drafts */}
       <AnimatePresence>
-        {(replyTarget || editTarget || selectedDraftFile) && (
+        {(replyTarget || editTarget || selectedDraftFile || forwardingMessage) && (
           <motion.div 
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
@@ -2134,6 +2854,11 @@ export const ChatWindow: React.FC = () => {
                     <span className="font-bold block text-[10px] text-cyan-400 uppercase tracking-widest">{language === 'ru' ? 'Ответ пользователю' : 'Reply interaction'} &bull; {replyTarget.senderName}</span>
                     <p className="truncate text-slate-400 font-medium font-sans">{replyTarget.text}</p>
                   </>
+                ) : forwardingMessage ? (
+                  <>
+                    <span className="font-bold block text-[10px] text-cyan-400 uppercase tracking-widest">{language === 'ru' ? 'Переслать сообщение' : 'Forward Message'}</span>
+                    <p className="truncate text-slate-400 font-medium font-sans">{forwardingMessage.text}</p>
+                  </>
                 ) : selectedDraftFile ? (
                   <>
                     <span className="font-bold block text-[10px] text-cyan-400 uppercase tracking-widest">{language === 'ru' ? 'Прикреплен файл' : 'Attachment drafted'}</span>
@@ -2145,7 +2870,7 @@ export const ChatWindow: React.FC = () => {
             
             <button 
               type="button" 
-              onClick={() => { setEditTarget(null); setReplyTarget(null); setSelectedDraftFile(null); setInputText(''); }} 
+              onClick={() => { setEditTarget(null); setReplyTarget(null); setSelectedDraftFile(null); setInputText(''); setForwardingMessage(null); }} 
               className="text-slate-500 hover:text-slate-300 pointer-events-auto cursor-pointer p-0.5 bg-[#1C1C1D] rounded-full"
             >
               <X className="w-3.5 h-3.5" />
@@ -2286,11 +3011,11 @@ export const ChatWindow: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Composer Bottom Input Area bar */}
-      <div className="p-2 md:p-3.5 border-t border-white/[0.04] z-20 shrink-0 pb-safe-bottom shadow-2xl relative backdrop-blur-md" style={{ background: 'var(--glass-header-bg)' }}>
-        <div className="max-w-4xl mx-auto flex items-end gap-2 relative">
+      {/* VisionOS Floating Composer Area */}
+      <div className="px-4 md:px-6 py-4 relative z-[150] select-none" style={{ background: 'transparent' }}>
+        <div className="max-w-4xl mx-auto flex items-end gap-3 relative">
           
-          {/* Floating Expandable Attachment Dropdown Menu */}
+          {/* Floating Action Menu - Attachment Options Dropdown Overlay */}
           <AnimatePresence>
             {showAttachmentDropdown && (
               <motion.div
@@ -2305,19 +3030,21 @@ export const ChatWindow: React.FC = () => {
                     setShowAttachmentDropdown(false);
                   }
                 }}
-                className="absolute bottom-12 right-2 z-40 border border-white/5 rounded-2xl shadow-2xl p-2 min-w-[215px] space-y-1 text-slate-200 select-none glass-panel backdrop-blur-lg touch-pan-x"
+                className="absolute bottom-16 left-0 z-[200] border border-white/10 rounded-[28px] shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-2.5 min-w-[240px] space-y-1 text-slate-200 select-none backdrop-blur-3xl overflow-hidden"
                 style={{ background: 'var(--glass-modal-bg)' }}
               >
-                <div className="text-[9px] uppercase font-mono font-bold tracking-widest text-[var(--glass-accent)] px-2 pb-1.5 border-b border-white/[0.04]">
+                <div className="text-[10px] uppercase font-mono font-bold tracking-[0.2em] text-cyan-400/80 px-4 py-2 mb-1 border-b border-white/5">
                   {language === 'ru' ? 'Действия и вложения' : 'Actions & Assets'}
                 </div>
 
                 {/* A. Document Upload */}
-                <label className="flex items-center gap-3 px-2.5 py-1.5 hover:bg-white/[0.04] rounded-xl cursor-pointer text-xs font-semibold hover:text-[var(--glass-accent)] transition-all">
-                  <span className="text-sm shrink-0">📁</span>
-                  <div>
-                    <span className="leading-tight block">{language === 'ru' ? 'Загрузить файл' : 'Upload File'}</span>
-                    <span className="text-[8px] text-slate-500 font-normal leading-none block mt-0.5">{language === 'ru' ? 'Документы, фото, видео' : 'Docs, images, videos'}</span>
+                <label className="flex items-center gap-3.5 px-3 py-2.5 hover:bg-white/5 rounded-2xl cursor-pointer text-sm font-semibold hover:text-cyan-400 transition-all active:scale-95">
+                  <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0 border border-blue-500/10">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="leading-tight block truncate">{language === 'ru' ? 'Загрузить файл' : 'Upload File'}</span>
+                    <span className="text-[9px] text-slate-500 font-medium leading-none block mt-1">{language === 'ru' ? 'Документы, фото, видео' : 'Docs, images, videos'}</span>
                   </div>
                   <input type="file" onChange={(e) => { handleImmediateFileUpload(e); setShowAttachmentDropdown(false); }} className="hidden" />
                 </label>
@@ -2333,12 +3060,14 @@ export const ChatWindow: React.FC = () => {
                       startVideoRecording(e.clientX, e.clientY);
                     }
                   }}
-                  className="w-full text-left flex items-center gap-3 px-2.5 py-1.5 hover:bg-white/[0.04] rounded-xl cursor-pointer text-xs font-semibold hover:text-[var(--glass-accent)] transition-all font-sans"
+                  className="w-full text-left flex items-center gap-3.5 px-3 py-2.5 hover:bg-white/5 rounded-2xl cursor-pointer text-sm font-semibold hover:text-cyan-400 transition-all active:scale-95 font-sans"
                 >
-                  <span className="text-sm shrink-0">📹</span>
-                  <div>
-                    <span className="leading-tight block">{language === 'ru' ? 'Записать кружочек' : 'Circular Video'}</span>
-                    <span className="text-[8px] text-slate-500 font-normal leading-none block mt-0.5">{language === 'ru' ? 'Видеосообщение' : 'Video note message'}</span>
+                  <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0 border border-purple-500/10">
+                    <Video className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="leading-tight block truncate">{language === 'ru' ? 'Записать кружочек' : 'Circular Video'}</span>
+                    <span className="text-[9px] text-slate-500 font-medium leading-none block mt-1">{language === 'ru' ? 'Видеосообщение' : 'Video note message'}</span>
                   </div>
                 </button>
 
@@ -2349,12 +3078,14 @@ export const ChatWindow: React.FC = () => {
                     setShowAttachmentDropdown(false);
                     setShowPollCreator(true);
                   }}
-                  className="w-full text-left flex items-center gap-3 px-2.5 py-1.5 hover:bg-white/[0.04] rounded-xl cursor-pointer text-xs font-semibold hover:text-[var(--glass-accent)] transition-all font-sans"
+                  className="w-full text-left flex items-center gap-3.5 px-3 py-2.5 hover:bg-white/5 rounded-2xl cursor-pointer text-sm font-semibold hover:text-cyan-400 transition-all active:scale-95 font-sans"
                 >
-                  <span className="text-sm shrink-0">📊</span>
-                  <div>
-                    <span className="leading-tight block">{language === 'ru' ? 'Создать опрос' : 'Create Poll'}</span>
-                    <span className="text-[8px] text-slate-500 font-normal leading-none block mt-0.5">{language === 'ru' ? 'Интерактивное голосование' : 'Interactive group voting'}</span>
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400 shrink-0 border border-amber-500/10">
+                    <BarChart3 className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="leading-tight block truncate">{language === 'ru' ? 'Создать опрос' : 'Create Poll'}</span>
+                    <span className="text-[9px] text-slate-500 font-medium leading-none block mt-1">{language === 'ru' ? 'Интерактивное голосование' : 'Interactive group voting'}</span>
                   </div>
                 </button>
 
@@ -2365,21 +3096,20 @@ export const ChatWindow: React.FC = () => {
                     setIsSilent(!isSilent);
                     setShowAttachmentDropdown(false);
                   }}
-                  className="w-full text-left flex items-center gap-3 px-2.5 py-1.5 hover:bg-white/[0.04] rounded-xl cursor-pointer text-xs font-semibold hover:text-[var(--glass-accent)] transition-all font-sans"
+                  className="w-full text-left flex items-center gap-3.5 px-3 py-2.5 hover:bg-white/5 rounded-2xl cursor-pointer text-sm font-semibold hover:text-cyan-400 transition-all active:scale-95 font-sans"
                 >
-                  <span className="text-sm shrink-0">{isSilent ? '🔔' : '🔕'}</span>
-                  <div>
-                    <span className="leading-tight block font-sans">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-colors ${isSilent ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' : 'bg-slate-500/10 text-slate-400 border-slate-500/10'}`}>
+                    {isSilent ? <BellOff className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="leading-tight block truncate">
                       {isSilent 
                         ? (language === 'ru' ? 'Включить звук' : 'Send with Audio') 
-                        : (language === 'ru' ? 'Отправить без звука' : 'Send Silently')
+                        : (language === 'ru' ? 'Без звука' : 'Send Silently')
                       }
                     </span>
-                    <span className="text-[8px] text-slate-500 font-normal leading-none block mt-0.5 animate-pulse font-mono">
-                      {isSilent
-                        ? (language === 'ru' ? 'Обычная отправка' : 'Notify with sound')
-                        : (language === 'ru' ? 'Без звука получателя' : 'No push notification sound')
-                      }
+                    <span className="text-[9px] text-slate-500 font-medium leading-none block mt-1 font-mono uppercase tracking-tighter">
+                      {isSilent ? 'Notifications ON' : 'No push sound'}
                     </span>
                   </div>
                 </button>
@@ -2390,33 +3120,16 @@ export const ChatWindow: React.FC = () => {
           {/* Transparent full-screen holding overlay to detect swipes & gestures cleanly */}
           {(recordingState === 'holding' || videoRecordingState === 'holding') && (
             <div 
-              className="fixed inset-0 z-[9999] cursor-grabbing bg-black/10 backdrop-blur-[0.5px] select-none touch-none"
-              onMouseMove={(e) => {
-                if (recordingState === 'holding') handleRecordMove(e.clientX, e.clientY);
-                if (videoRecordingState === 'holding') handleVideoRecordMove(e.clientX, e.clientY);
-              }}
-              onTouchMove={(e) => {
-                const touch = e.touches[0];
-                if (recordingState === 'holding') handleRecordMove(touch.clientX, touch.clientY);
-                if (videoRecordingState === 'holding') handleVideoRecordMove(touch.clientX, touch.clientY);
-              }}
-              onMouseUp={() => {
-                if (recordingState === 'holding') handleRecordRelease();
-                if (videoRecordingState === 'holding') handleVideoRecordRelease();
-              }}
-              onTouchEnd={() => {
-                if (recordingState === 'holding') handleRecordRelease();
-                if (videoRecordingState === 'holding') handleVideoRecordRelease();
-              }}
+              className="fixed inset-0 z-[9999] bg-black/10 backdrop-blur-[0.5px] select-none pointer-events-none touch-none"
             />
           )}
 
           {/* Unified capsule style composer block */}
-          <form onSubmit={handleMessageSend} className="flex-1 flex items-center gap-2 relative z-30">
+          <form onSubmit={handleMessageSend} className="px-4 pb-6 md:pb-8 flex-1 flex items-end relative z-30">
             {voicePreviewBlob ? (
-              <div className="flex-1 flex items-center justify-between bg-black/45 hover:bg-black/55 border border-white/5 px-3 py-1.5 rounded-full text-xs text-slate-100 font-semibold shadow-inner select-none gap-2 min-h-[46px] animate-fade-in-up md:p-2 backdrop-blur-md">
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <div className="text-[var(--glass-accent)] font-semibold text-[10px] uppercase font-mono px-1.5 shrink-0 hidden sm:block">
+              <div className="flex-1 flex items-center justify-between glass-pill px-6 py-3.5 text-xs text-slate-100 font-semibold select-none gap-4 min-h-[64px] animate-fade-in-up">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="text-cyan-400 font-bold text-[10px] uppercase tracking-[0.2em] px-3 py-1.5 bg-cyan-400/15 rounded-full shrink-0 hidden sm:block border border-cyan-400/20">
                     {language === 'ru' ? 'Черновик' : 'Draft'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -2424,165 +3137,211 @@ export const ChatWindow: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-1.5 shrink-0 pr-1">
-                  {/* Delete / Discard */}
+                <div className="flex items-center gap-3 shrink-0">
                   <button 
                     type="button" 
                     onClick={resetRecordingState}
-                    className="p-1.5 px-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-full text-[10px] font-mono cursor-pointer transition-all border border-rose-500/15"
-                    title={language === 'ru' ? 'Удалить черновик' : 'Discard draft'}
+                    className="px-4 py-2.5 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 rounded-2xl text-[10px] font-bold cursor-pointer transition-all border border-rose-500/20 uppercase tracking-widest active:scale-95"
                   >
-                    {language === 'ru' ? 'Удалить' : 'Delete'}
+                    {language === 'ru' ? 'Удалить' : 'Discard'}
                   </button>
-                  {/* Send previewed note */}
                   <button 
                     type="button" 
                     onClick={sendPreviewVoiceMessage}
-                    className="p-2 bg-[var(--glass-accent)] text-white hover:opacity-95 rounded-full text-[10px] font-semibold cursor-pointer transition-all flex items-center justify-center h-8 w-8"
-                    title={language === 'ru' ? 'Отправить голосовое сообщение' : 'Send Voice Note'}
+                    className="p-3.5 bg-cyan-500 text-white hover:bg-cyan-400 rounded-full shadow-[0_12px_24px_rgba(0,122,255,0.4)] active:scale-90 transition-all border border-white/20"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-5.5 h-5.5" />
                   </button>
                 </div>
               </div>
             ) : (
-              <>
-              <div className={`flex flex-1 relative items-center gap-1.5 transition-all duration-300 ${isRecording ? 'opacity-0 pointer-events-none scale-95' : 'opacity-100 scale-100'}`}>
-                <div className="flex-1 bg-black/15 hover:bg-black/25 focus-within:bg-black/30 border border-white/5 rounded-[24px] px-3.5 py-1.5 flex items-center gap-2 min-h-[44px] transition-all focus-within:border-[var(--glass-border-focus)] shadow-inner relative z-40">
+              <div className={`flex flex-1 relative items-center transition-all duration-500 opacity-100 scale-100 translate-y-0`}>
+                <div className="flex-1 glass-pill pl-4 pr-3 py-2.5 flex items-center gap-2 min-h-[60px] transition-all focus-within:ring-1 focus-within:ring-white/20 relative z-40 group">
                   
-                  {/* 1. Smile Sticker picker */}
-                  <button
-                    type="button"
-                    onClick={() => setShowStickerPicker(!showStickerPicker)}
-                    className={`text-slate-400 hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0`}
-                    title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
-                  >
-                    <Smile className="w-4.5 h-4.5" />
-                  </button>
+                  {/* 1. Paperclip for attachments */}
+                  <div className={`flex flex-1 items-center gap-2 transition-all duration-300 ${isRecording ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                    <button 
+                      type="button"
+                      disabled={cooldownRemaining > 0}
+                      onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
+                      className={`transition-all duration-400 cursor-pointer shrink-0 disabled:opacity-30 p-2.5 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showAttachmentDropdown ? 'text-cyan-400 bg-cyan-500/20 rotate-45 scale-110 shadow-lg' : 'text-[var(--glass-text-muted)]'}`}
+                      title={language === 'ru' ? 'Прикрепить' : 'Attach'}
+                    >
+                      <Paperclip className="w-6.5 h-6.5" />
+                    </button>
 
-                  {/* 2. Compact text input Area */}
-                  <TextareaAutosize 
-                    ref={inputRef as any}
-                    value={inputText}
-                    disabled={cooldownRemaining > 0}
-                    maxRows={5}
-                    onChange={(e) => {
-                      handleInputChange(e.target.value);
-                      if (activeChat) sendTypingStatus(activeChat.id);
-                    }}
-                    onKeyDown={handleKeyDown}
-                    onPaste={(e) => {
-                      if (e.clipboardData.files && e.clipboardData.files[0]) {
-                        const file = e.clipboardData.files[0];
-                        setSelectedDraftFile(file);
-                        e.preventDefault();
-                      }
-                    }}
-                    placeholder={
-                      cooldownRemaining > 0 
-                        ? (language === 'ru' ? `Медленный режим: Подождите ${cooldownRemaining}с...` : `Slow Mode: Wait ${cooldownRemaining}s...`)
-                        : editTarget 
-                          ? (language === 'ru' ? "Изменить..." : "Change text...") 
-                          : (language === 'ru' ? "Cообщение..." : "Message...")
-                    }
-                    className="flex-1 bg-transparent text-slate-100 text-sm focus:outline-none placeholder-slate-650 min-h-[20px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-1 py-1"
-                  />
-
-                  {/* 3. Dropdown trigger action menu button and File Picker */}
-                  <button 
-                    type="button"
-                    disabled={cooldownRemaining > 0}
-                    onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
-                    className={`hover:text-[var(--glass-accent)] transition cursor-pointer shrink-0 disabled:opacity-30 ${showAttachmentDropdown ? 'text-[var(--glass-accent)]' : 'text-slate-400'}`}
-                    title={language === 'ru' ? 'Прикрепить файл или действие' : 'Attachment & actions'}
-                  >
-                    <Paperclip className="w-4.5 h-4.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Recording UI Overlay */}
-              {isRecording && (
-                <div className="absolute inset-0 right-[52px] flex items-center justify-between bg-[#0B0B0D]/95 md:bg-black/45 border border-white/5 md:border-white/10 px-2 md:px-3 py-1.5 rounded-[24px] text-xs text-slate-100 font-semibold shadow-inner select-none min-h-[44px] animate-fade-in-up md:p-2 backdrop-blur-md gap-2 z-40">
-                  {/* 1. Header Row (especially on mobile) with indicators and status */}
-                  <div className="flex items-center justify-between md:justify-start gap-2 px-1 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                      </span>
-                      <span className="font-bold text-rose-500 font-mono tracking-wider text-[10px] uppercase hidden sm:inline">
-                        {language === 'ru' ? 'ЗАПИСЬ' : 'REC'}
-                      </span>
+                    {/* 2. Compact text input Area */}
+                    <div className="flex-1 min-w-0 bg-[var(--glass-bg-hover)] rounded-[24px] backdrop-blur-md border border-[var(--glass-border)] px-4">
+                      <TextareaAutosize 
+                        ref={inputRef as any}
+                        value={inputText}
+                        disabled={cooldownRemaining > 0}
+                        maxRows={6}
+                        onChange={(e) => {
+                          handleInputChange(e.target.value);
+                          if (activeChat) sendTypingStatus(activeChat.id);
+                        }}
+                        onKeyDown={handleKeyDown}
+                        onPaste={(e) => {
+                          if (e.clipboardData.files && e.clipboardData.files[0]) {
+                            const file = e.clipboardData.files[0];
+                            setSelectedDraftFile(file);
+                            e.preventDefault();
+                          }
+                        }}
+                        placeholder={
+                          cooldownRemaining > 0 
+                            ? (language === 'ru' ? `Подождите ${cooldownRemaining}с...` : `Wait ${cooldownRemaining}s...`)
+                            : editTarget 
+                              ? (language === 'ru' ? "Изменить..." : "Change text...") 
+                              : (language === 'ru' ? "Cообщение..." : "Message...")
+                        }
+                        className="w-full bg-transparent text-[var(--glass-text)] text-[15px] focus:outline-none placeholder-[var(--glass-text-muted)] min-h-[36px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-0.5 py-2 selection:bg-cyan-500/30"
+                      />
                     </div>
 
-                    <div className="text-[9px] uppercase font-mono tracking-wider text-slate-400 bg-white/5 px-1.5 py-0.5 rounded-full">
-                      {recordingState === 'holding' 
-                        ? (language === 'ru' ? 'Удерживание' : 'Holding') 
-                        : (language === 'ru' ? 'Закреплено' : 'Locked')}
-                    </div>
+                    {/* 3. Smile Sticker picker */}
+                    <button
+                      type="button"
+                      onClick={() => setShowStickerPicker(!showStickerPicker)}
+                      className={`text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-all cursor-pointer shrink-0 p-2.5 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showStickerPicker ? 'text-cyan-400 bg-cyan-500/20' : ''}`}
+                      title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
+                    >
+                      <Smile className="w-6.5 h-6.5" />
+                    </button>
                   </div>
 
-                  {/* 2. Waveform inside the middle area */}
-                  <div className="flex-1 flex gap-[2px] items-center justify-center px-1 overflow-hidden min-h-[22px] max-w-[140px] md:max-w-xs mx-auto">
-                    {recordingAmplitudes.length === 0 ? (
-                      [6, 12, 18, 12, 6, 8, 14, 18, 10, 6, 12, 16, 9, 5].map((h, idx) => (
-                        <span key={idx} className="w-[1.5px] bg-rose-500/50 rounded-full" style={{ height: `${h}px` }} />
-                      ))
+                  {/* Recording UI overlay inside pill */}
+                  {isRecording && (
+                    <div className="absolute inset-y-0 left-0 right-[60px] flex items-center justify-between px-4 text-xs text-slate-100 font-semibold animate-fade-in-up gap-3 z-50 bg-[#0f0f13]/90 backdrop-blur-xl rounded-[28px] border border-white/5">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                          </span>
+                          <span className="font-bold text-rose-500 font-mono tracking-wider text-[10px] uppercase hidden sm:inline">
+                            {language === 'ru' ? 'ЗАПИСЬ' : 'REC'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Waveform */}
+                      <div className="flex-1 flex gap-[2px] items-center justify-center px-1 overflow-hidden h-[24px] max-w-[120px] md:max-w-[200px] mx-auto">
+                        {recordingAmplitudes.length === 0 ? (
+                          [6, 12, 18, 12, 6, 8, 14, 18, 10, 6, 12, 16, 9, 5].map((h, idx) => (
+                            <span key={idx} className="w-[1.5px] bg-cyan-500/50 rounded-full" style={{ height: `${h}px` }} />
+                          ))
+                        ) : (
+                          recordingAmplitudes.map((amp, idx) => (
+                            <span key={idx} className="w-[1.5px] bg-cyan-500/80 rounded-full transition-all duration-75" style={{ height: `${amp}px` }} />
+                          ))
+                        )}
+                      </div>
+
+                      {/* Timer & Controls */}
+                      <div className="flex items-center justify-end gap-1.5 shrink-0">
+                        <div className="font-mono text-[11px] text-slate-200 w-[40px] text-right">
+                          {Math.floor(recordDuration / 60)}:{(recordDuration % 60).toString().padStart(2, '0')}
+                        </div>
+
+                        {recordingState === 'locked' && (
+                          <div className="flex items-center gap-1 ml-2">
+                            <button 
+                              type="button" 
+                              onClick={cancelRecording}
+                              className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg cursor-pointer transition-all border border-rose-500/15 flex items-center justify-center h-7 w-7"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                            
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                shouldSendOnStopRef.current = false;
+                                stopRecording();
+                              }}
+                              className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/15 rounded-lg cursor-pointer transition-all flex items-center justify-center h-7 w-7"
+                            >
+                              <Square className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. Unified Action Button (Send / Mic / Video) INSIDE the pill */}
+                  <div className="shrink-0 flex items-center justify-center">
+                    {cooldownRemaining > 0 ? (
+                      <div className="w-11 h-11 flex items-center justify-center p-2.5 bg-slate-900/40 border border-slate-800/80 rounded-full text-amber-500 shrink-0 shadow-md">
+                        <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+                      </div>
+                    ) : inputText.trim() || selectedDraftFile ? (
+                      <button 
+                        type="submit" 
+                        className="p-2.5 bg-cyan-500 hover:opacity-90 rounded-full text-white shadow-lg flex items-center justify-center h-11 w-11 transition-all active:scale-95 shrink-0 border border-white/20"
+                      >
+                        <Send className="w-5 h-5 ml-0.5" />
+                      </button>
                     ) : (
-                      recordingAmplitudes.map((amp, idx) => (
-                        <span key={idx} className="w-[1.5px] bg-rose-500/80 rounded-full transition-all duration-75" style={{ height: `${amp}px` }} />
-                      ))
+                      <div className="flex items-center gap-1">
+                        {recordingMode === 'voice' ? (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => {
+                              try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+                              startRecording(e.clientX, e.clientY);
+                            }}
+                            onPointerMove={(e) => { handleRecordMove(e.clientX, e.clientY); }}
+                            onPointerUp={(e) => {
+                              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+                              handleRecordRelease();
+                            }}
+                            onPointerCancel={(e) => {
+                              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+                              handleRecordRelease();
+                            }}
+                            className="p-2.5 bg-cyan-500 hover:opacity-90 rounded-full text-white shadow-lg flex items-center justify-center h-11 w-11 transition-all active:scale-90 cursor-pointer shrink-0 select-none touch-none border border-white/20"
+                          >
+                            {activeChat?.type === 'channel' ? <Send className="w-5 h-5 ml-0.5" /> : <Mic className="w-5 h-5" />}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setRecordingMode('voice')}
+                            onPointerDown={(e) => {
+                              try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+                              startVideoRecording(e.clientX, e.clientY);
+                            }}
+                            onPointerMove={(e) => { handleVideoRecordMove(e.clientX, e.clientY); }}
+                            onPointerUp={(e) => {
+                              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+                              handleVideoRecordRelease();
+                            }}
+                            onPointerCancel={(e) => {
+                              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+                              handleVideoRecordRelease();
+                            }}
+                            className="p-2.5 bg-amber-500 hover:opacity-90 rounded-full text-white shadow-lg flex items-center justify-center h-11 w-11 transition-all active:scale-90 cursor-pointer shrink-0 select-none touch-none border border-white/20"
+                          >
+                            {activeChat?.type === 'channel' ? <Send className="w-5 h-5 ml-0.5" /> : <Video className="w-5 h-5" />}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+          </form>
+        </div>
+      </div>
 
-                  {/* 3. Timer & Controls Row */}
-                  <div className="flex items-center justify-end gap-1.5 px-0.5 shrink-0">
-                    <div className="font-mono text-[10px] text-rose-400 bg-rose-950/40 border border-rose-500/10 px-1.5 py-0.5 rounded-lg w-auto text-center">
-                      {Math.floor(recordDuration / 60)}:{(recordDuration % 60).toString().padStart(2, '0')}
-                    </div>
 
-                    {/* Complete interactive controls grouping */}
-                    <div className="flex items-center gap-1">
-                      {/* Discard trash button */}
-                      <button 
-                        type="button" 
-                        onClick={cancelRecording}
-                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg cursor-pointer transition-all border border-rose-500/15 flex items-center justify-center h-7 w-7"
-                        title={language === 'ru' ? 'Удалить запись' : 'Cancel recording'}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                      
-                      {/* Stop and Review/Preview button */}
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          shouldSendOnStopRef.current = false;
-                          stopRecording();
-                        }}
-                        className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/15 rounded-lg cursor-pointer transition-all flex items-center justify-center h-7 w-7"
-                        title={language === 'ru' ? 'Остановить запись и прослушать' : 'Stop and review'}
-                      >
-                        <Square className="w-3.5 h-3.5" />
-                      </button>
+            {/* No old recording UI overlay */}
 
-                      {/* Send direct button */}
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          shouldSendOnStopRef.current = true;
-                          stopRecording();
-                        }}
-                        className="p-1.5 bg-[var(--glass-accent)] text-white hover:opacity-95 rounded-lg cursor-pointer transition-all flex items-center justify-center h-7 w-7"
-                        title={language === 'ru' ? 'Отправить голосовое' : 'Send voice note'}
-                      >
-                        <Send className="w-3 h-3 ml-0.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Gesture Swipe Lock indicator tooltip in holding mode */}
+            {/* Gesture Swipe Lock indicator tooltip in holding mode */}
                   {(recordingState === 'holding' || videoRecordingState === 'holding') && (() => {
                     const gestures = recordingState === 'holding' ? recordGestures : videoGestures;
                     return (
@@ -2630,217 +3389,84 @@ export const ChatWindow: React.FC = () => {
                       </>
                     );
                   })()}
-                </div>
-              )}
-              </>
-            )}
-
-            {/* Flight Send command or voice message recorder key (adjacent round button) */}
-            {!voicePreviewBlob && (
-              <div className={`shrink-0 transition-all duration-300 ease-in-out flex items-center justify-center overflow-hidden ${
-                isRecording 
-                  ? 'opacity-0 scale-50 w-0 -ml-1.5' 
-                  : 'opacity-100 scale-100 w-11'
-              }`}>
-                {cooldownRemaining > 0 ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="p-2.5 bg-slate-900/40 border border-slate-800/80 rounded-full text-amber-500 shrink-0 transition-all shadow-md h-11 w-11 flex items-center justify-center"
-                    title={language === 'ru' ? `Медленный режим: Подождите еще ${cooldownRemaining}с` : `Slow Mode: Wait ${cooldownRemaining}s`}
-                  >
-                    <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
-                  </button>
-                ) : inputText.trim() || selectedDraftFile ? (
-                  <div className="relative z-50">
-                    <button 
-                      type="submit" 
-                      disabled={!inputText.trim() && !selectedDraftFile}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setShowScheduleDropdown(true);
-                      }}
-                      className="relative p-2.5 bg-[var(--glass-accent)] hover:opacity-90 disabled:opacity-30 rounded-full text-white font-bold shadow-lg flex items-center justify-center h-11 w-11 transition-all border border-white/10 cursor-pointer active:scale-95 before:absolute before:-inset-4 before:content-['']"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                    {showScheduleDropdown && (
-                      <div className="absolute bottom-16 right-0 w-64 bg-slate-900 border border-slate-700 shadow-2xl rounded-xl p-3 z-[100] animate-fade-in-up">
-                        <div className="text-xs font-semibold text-slate-200 mb-2 truncate">
-                          {language === 'ru' ? 'Отправить позже (планирование)' : 'Schedule Message'}
-                        </div>
-                        <input 
-                          type="datetime-local" 
-                          className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-cyan-500 mb-2 text-xs"
-                          min={new Date().toISOString().slice(0, 16)}
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              setScheduledTime(new Date(e.target.value).getTime());
-                              setShowScheduleDropdown(false);
-                            }
-                          }}
-                        />
-                        <button 
-                           type="button"
-                           onClick={() => setShowScheduleDropdown(false)}
-                           className="w-full py-1 text-[10px] text-slate-400 hover:text-slate-200 underline text-center"
-                        >
-                           {language === 'ru' ? 'Отмена' : 'Cancel'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      pressStartTimeRef.current = Date.now();
-                      const x = e.clientX;
-                      const y = e.clientY;
-                      recordingPressTimerRef.current = setTimeout(() => {
-                        if (recordingMode === 'voice') startRecording(x, y);
-                        else startVideoRecording(x, y);
-                      }, 200);
-                    }}
-                    onTouchStart={(e) => {
-                      e.preventDefault();
-                      if (document.activeElement instanceof HTMLElement) {
-                        document.activeElement.blur();
-                      }
-                      const touch = e.touches[0];
-                      pressStartTimeRef.current = Date.now();
-                      const x = touch.clientX;
-                      const y = touch.clientY;
-                      recordingPressTimerRef.current = setTimeout(() => {
-                        if (recordingMode === 'voice') startRecording(x, y);
-                        else startVideoRecording(x, y);
-                      }, 200);
-                    }}
-                    onTouchMove={(e) => {
-                      if (recordingMode === 'voice' && recordingState === 'holding') {
-                        const touch = e.touches[0];
-                        handleRecordMove(touch.clientX, touch.clientY);
-                      }
-                    }}
-                    onMouseUp={() => {
-                      const elapsed = Date.now() - pressStartTimeRef.current;
-                      if (elapsed < 200) {
-                        clearTimeout(recordingPressTimerRef.current);
-                        setRecordingMode(prev => prev === 'voice' ? 'video' : 'voice');
-                        return;
-                      }
-                      
-                      if (recordingMode === 'voice') {
-                        handleRecordRelease();
-                      } else {
-                        handleVideoRecordRelease();
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      const elapsed = Date.now() - pressStartTimeRef.current;
-                      if (elapsed < 200) {
-                        clearTimeout(recordingPressTimerRef.current);
-                        setRecordingMode(prev => prev === 'voice' ? 'video' : 'voice');
-                        return;
-                      }
-
-                      if (recordingMode === 'voice') {
-                        handleRecordRelease();
-                      } else {
-                        handleVideoRecordRelease();
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      // Safety for mouse dragged away before timeout
-                      if (Date.now() - pressStartTimeRef.current < 200) {
-                        clearTimeout(recordingPressTimerRef.current);
-                      }
-                    }}
-                    className={`relative p-2.5 bg-black/15 border border-white/5 hover:bg-black/25 rounded-full shrink-0 transition-all shadow-md cursor-pointer select-none h-11 w-11 flex items-center justify-center active:scale-95 touch-none z-50 before:absolute before:-inset-4 before:content-[''] ${
-                      recordingMode === 'video' ? 'text-amber-400 hover:text-amber-500 hover:scale-105' : 'text-[var(--glass-accent)] hover:text-rose-500 hover:scale-105'
-                    }`}
-                    title={
-                      recordingMode === 'voice'
-                        ? (language === 'ru' ? 'Запись голоса (зажмите) / Смена режима (нажмите)' : 'Voice Message (hold) / Tap to toggle')
-                        : (language === 'ru' ? 'Кружочек (зажмите) / Смена режима (нажмите)' : 'Video Note (hold) / Tap to toggle')
-                    }
-                  >
-                    {recordingMode === 'voice' ? <Mic className="w-5 h-5" /> : <Video className="w-5 h-5 text-amber-400" />}
-                  </button>
-                )}
-              </div>
-            )}
-          </form>
-        </div>
-      </div>
-
-      {/* Poll Creator Portal Overlay */}
+              {/* Poll Creator Portal Overlay */}
       <AnimatePresence>
         {showPollCreator && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 select-none"
+            className="fixed inset-0 bg-black/60 backdrop-blur-2xl flex items-center justify-center p-4 z-[600] select-none"
+            onClick={() => setShowPollCreator(false)}
           >
             <motion.div 
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 20 }}
+              initial={{ scale: 0.9, y: 30, filter: 'blur(20px)' }}
+              animate={{ scale: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ scale: 0.9, y: 30, filter: 'blur(20px)' }}
               drag="y"
               dragConstraints={{ top: 0, bottom: 0 }}
-              dragElastic={0.3}
+              dragElastic={0.2}
               onDragEnd={(e, info) => {
-                if (info.offset.y > 60 || info.offset.y < -60) {
+                if (Math.abs(info.offset.y) > 80) {
                   setShowPollCreator(false);
                 }
               }}
-              className="w-full max-w-sm bg-[#0E0E10] border border-slate-850 rounded-2xl p-5 shadow-2xl space-y-4"
+              className="w-full max-w-sm vision-floating-header border border-white/20 rounded-[36px] p-7 shadow-[0_30px_70px_rgba(0,0,0,0.6)] space-y-6"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-between items-center border-b border-slate-900 pb-2" style={{ touchAction: 'none' }}>
-                <span className="font-bold text-slate-205 text-sm flex items-center gap-1.5">📊 {language === 'ru' ? 'Создать новый опрос' : 'Create Poll'}</span>
-                <button type="button" onClick={() => setShowPollCreator(false)} className="text-slate-500 hover:text-slate-300 cursor-pointer text-sm font-bold bg-[#1A1A1E] px-2 py-0.5 rounded-md">✕</button>
+              <div className="flex justify-between items-center border-b border-white/10 pb-4">
+                <div className="flex flex-col">
+                  <span className="font-black text-white text-[20px] tracking-tight">{language === 'ru' ? 'Новый опрос' : 'New Poll'}</span>
+                  <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{language === 'ru' ? 'ОБЩЕСТВЕННОЕ МНЕНИЕ' : 'PUBLIC OPINION'}</span>
+                </div>
+                <button type="button" onClick={() => setShowPollCreator(false)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white bg-white/[0.05] rounded-[18px] transition active:scale-90 cursor-pointer border border-white/10"><X className="w-5 h-5" /></button>
               </div>
             
-            <div className="space-y-3">
+            <div className="space-y-5">
               <div>
-                <label className="block text-[10px] text-slate-400 font-mono mb-1">{language === 'ru' ? 'Вопрос опроса' : 'Question title'}</label>
+                <label className="block text-[10.5px] text-cyan-400/90 font-black uppercase tracking-widest mb-2 ml-1">{language === 'ru' ? 'Вопрос' : 'Question'}</label>
                 <input 
                   type="text" 
                   value={pollQuestion}
                   onChange={(e) => setPollQuestion(e.target.value)}
-                  placeholder={language === 'ru' ? 'Введите вопрос опроса...' : 'Enter question...'}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                  placeholder={language === 'ru' ? 'О чем спросим?' : 'What to ask?'}
+                  className="w-full bg-black/30 border border-white/10 rounded-[22px] px-5 py-4 text-[15px] text-white focus:outline-none focus:border-cyan-400/50 focus:bg-black/50 transition-all shadow-inner font-bold placeholder-slate-600"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] text-slate-400 font-mono mb-1">{language === 'ru' ? 'Варианты ответов (через запятую)' : 'Answers options (separated by comma)'}</label>
+                <label className="block text-[10.5px] text-cyan-400/90 font-black uppercase tracking-widest mb-2 ml-1">{language === 'ru' ? 'Варианты (через запятую)' : 'Options (comma separated)'}</label>
                 <textarea 
                   value={pollOptionsInput}
                   onChange={(e) => setPollOptionsInput(e.target.value)}
-                  placeholder={language === 'ru' ? 'Черный, Белый, Серый' : 'Choice A, Choice B, Choice C'}
-                  className="w-full h-16 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-220 focus:outline-none focus:border-cyan-500 resize-none"
+                  placeholder={language === 'ru' ? 'Да, Нет, Возможно' : 'Yes, No, Maybe'}
+                  className="w-full h-28 bg-black/30 border border-white/10 rounded-[22px] px-5 py-4 text-[15px] text-white focus:outline-none focus:border-cyan-400/50 focus:bg-black/50 resize-none transition-all shadow-inner custom-scrollbar font-bold placeholder-slate-600"
                 />
               </div>
 
-              <div className="flex items-center gap-3.5 pt-1">
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-450">
+              <div className="flex flex-wrap items-center gap-5 pt-1">
+                <label className="flex items-center gap-3 cursor-pointer text-[13px] text-slate-200 group font-bold">
+                  <div className={`w-6 h-6 rounded-[10px] border flex items-center justify-center transition-all duration-300 ${pollIsMultiple ? 'bg-cyan-500 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-white/5 border-white/20 group-hover:border-white/40'}`}>
+                    {pollIsMultiple && <Check className="w-4 h-4 text-white font-black" />}
+                  </div>
                   <input 
                     type="checkbox"
                     checked={pollIsMultiple}
                     onChange={(e) => setPollIsMultiple(e.target.checked)}
-                    className="rounded border-slate-800 text-cyan-500 focus:ring-0 cursor-pointer bg-slate-950"
+                    className="hidden"
                   />
-                  <span>{language === 'ru' ? 'Выбор нескольких' : 'Multiple selection'}</span>
+                  <span>{language === 'ru' ? 'Несколько ответов' : 'Multiple choices'}</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-450">
+                
+                <label className="flex items-center gap-3 cursor-pointer text-[13px] text-slate-200 group font-bold">
+                  <div className={`w-6 h-6 rounded-[10px] border flex items-center justify-center transition-all duration-300 ${pollIsAnonymous ? 'bg-cyan-500 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-white/5 border-white/20 group-hover:border-white/40'}`}>
+                    {pollIsAnonymous && <Check className="w-4 h-4 text-white font-black" />}
+                  </div>
                   <input 
                     type="checkbox"
                     checked={pollIsAnonymous}
                     onChange={(e) => setPollIsAnonymous(e.target.checked)}
-                    className="rounded border-slate-800 text-cyan-500 focus:ring-0 cursor-pointer bg-slate-950"
+                    className="hidden"
                   />
                   <span>{language === 'ru' ? 'Анонимно' : 'Anonymous'}</span>
                 </label>
@@ -2853,7 +3479,7 @@ export const ChatWindow: React.FC = () => {
                 if (!pollQuestion.trim() || !pollOptionsInput.trim()) return;
                 const opts = pollOptionsInput.split(',').map(s => s.trim()).filter(Boolean);
                 if (opts.length < 2) {
-                  showToast(language === 'ru' ? 'Пожалуйста, введите как минимум 2 варианта ответа!' : 'Enter at least 2 distinct options!', 'error');
+                  showToast(language === 'ru' ? 'Введите минимум 2 варианта!' : 'Enter at least 2 options!', 'error');
                   return;
                 }
                 await sendPollMessage(pollQuestion.trim(), opts, pollIsAnonymous, pollIsMultiple);
@@ -2862,38 +3488,42 @@ export const ChatWindow: React.FC = () => {
                 setShowPollCreator(false);
                 setTimeout(() => scrollContainerRef.current?.scrollTo({ top: 9999999 }), 200);
               }}
-              className="w-full py-2 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shrink-0 cursor-pointer"
+              className="w-full py-4.5 bg-gradient-to-r from-cyan-500 to-sky-600 hover:opacity-95 text-white font-black rounded-[22px] text-[15px] tracking-tight transition shadow-[0_15px_30px_rgba(6,182,212,0.3)] active:scale-95 cursor-pointer border border-white/10"
             >
-              🚀 {language === 'ru' ? 'Выпустить опрос в эфир' : 'Publish interactive poll'}
+              {language === 'ru' ? 'Создать опрос' : 'Create Poll'}
             </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
+
       {/* Selected Image Fullscreen Modal Viewer */}
       <AnimatePresence>
         {selectedImage && (
           <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/95 backdrop-blur z-[200] flex items-center justify-center p-2 sm:p-4 select-none cursor-zoom-out"
+            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+            animate={{ opacity: 1, backdropFilter: 'blur(40px)' }}
+            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+            className="fixed inset-0 bg-black/40 z-[1000] flex items-center justify-center p-4 sm:p-8 select-none cursor-zoom-out overflow-hidden"
             onClick={() => setSelectedImage(null)}
           >
-            <button 
+            <motion.button 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
               type="button"
               onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}
-              className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition cursor-pointer z-[210] border border-white/10"
+              className="absolute top-8 right-8 w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-xl border border-white/20 transition-all z-[1010] cursor-pointer"
               title={language === 'ru' ? 'Закрыть' : 'Close'}
             >
-              <X className="w-5 h-5" />
-            </button>
+              <X className="w-6 h-6" />
+            </motion.button>
             
             <motion.img 
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.95 }}
+              initial={{ scale: 0.8, opacity: 0, filter: 'blur(20px)' }}
+              animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
+              exit={{ scale: 0.8, opacity: 0, filter: 'blur(20px)' }}
+              transition={{ type: 'spring', stiffness: 260, damping: 25 }}
               drag="y"
               dragConstraints={{ top: 0, bottom: 0 }}
               dragElastic={0.4}
@@ -2904,7 +3534,7 @@ export const ChatWindow: React.FC = () => {
               }}
               src={selectedImage} 
               alt="Fullscreen preview" 
-              className="max-w-full max-h-full object-contain cursor-default" 
+              className="max-w-full max-h-full object-contain rounded-[36px] shadow-[0_60px_120px_rgba(0,0,0,0.8)] border border-white/20 pointer-events-auto"
               onClick={(e) => e.stopPropagation()}
             />
           </motion.div>
@@ -3083,8 +3713,8 @@ export const ChatWindow: React.FC = () => {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-[160] bg-slate-900 border-t border-slate-800 rounded-t-3xl p-4 flex md:hidden flex-col shadow-2xl pb-safe"
+              transition={{ type: "spring", damping: 30, stiffness: 350 }}
+              className="fixed bottom-3 left-3 right-3 z-[160] vision-floating-header rounded-[36px] p-5 flex md:hidden flex-col shadow-[0_20px_60px_rgba(0,0,0,0.6)] pb-safe"
               drag="y"
               dragConstraints={{ top: 0, bottom: 0 }}
               dragElastic={{ top: 0, bottom: 0.5 }}
@@ -3092,9 +3722,9 @@ export const ChatWindow: React.FC = () => {
                 if (info.offset.y > 60) setActiveMessageMenuId(null);
               }}
             >
-              <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-4" />
+              <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-5" />
               
-              <div className="flex gap-4 justify-around mb-6 text-2xl bg-black/20 p-3 rounded-2xl border border-white/5">
+              <div className="flex gap-4 justify-around mb-6 text-2xl bg-white/5 p-4 rounded-3xl border border-white/10 backdrop-blur-md">
                 {['❤️', '🔥', '👍', '😂', '😢', '😡'].map((emoji) => (
                    <button 
                      key={emoji}
@@ -3116,6 +3746,14 @@ export const ChatWindow: React.FC = () => {
                 >
                   <Reply className="w-5 h-5 text-cyan-400" />
                   {language === 'ru' ? 'Ответить' : 'Reply'}
+                </button>
+
+                <button 
+                  onClick={() => { setForwardingMessage(activeMenuMessage); setActiveMessageMenuId(null); }}
+                  className="flex items-center gap-3 w-full p-3.5 bg-slate-800/40 hover:bg-slate-800 rounded-xl text-left text-sm font-semibold active:scale-95 transition"
+                >
+                  <Forward className="w-5 h-5 text-sky-400" />
+                  {language === 'ru' ? 'Переслать' : 'Forward'}
                 </button>
 
                 <button 
@@ -3192,6 +3830,112 @@ export const ChatWindow: React.FC = () => {
           </motion.div>
         ))}
       </AnimatePresence>
+
+      {/* Forwarding Modal */}
+      <AnimatePresence>
+        {forwardingMessage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
+            onClick={() => setForwardingMessage(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-slate-900 border border-white/5 w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-white/5 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-100">{language === 'ru' ? 'Переслать сообщение' : 'Forward Message'}</h3>
+                  <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest mt-0.5">Select destination node</p>
+                </div>
+                <button onClick={() => setForwardingMessage(null)} className="p-2 hover:bg-white/5 rounded-full text-slate-400 transition">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 bg-white/5 border-b border-white/5">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input 
+                    type="text"
+                    autoFocus
+                    placeholder={language === 'ru' ? 'Поиск чатов...' : 'Search chats...'}
+                    value={forwardSearchQuery}
+                    onChange={(e) => setForwardSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950/60 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 transition-all font-sans"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                {chats
+                  .filter(c => {
+                    const name = c.type === 'direct' 
+                      ? globalUsers.find(u => u.uid === c.members.find(m => m !== currentUser?.uid))?.displayName || 'Unknown'
+                      : c.title;
+                    return name.toLowerCase().includes(forwardSearchQuery.toLowerCase());
+                  })
+                  .map(c => {
+                    const targetUser = c.type === 'direct' 
+                      ? globalUsers.find(u => u.uid === c.members.find(m => m !== currentUser?.uid))
+                      : null;
+                    const chatName = c.type === 'direct' ? targetUser?.displayName || 'Unknown' : c.title;
+
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={async () => {
+                          // Note: In a real app we might want to switch activeChat and then send, 
+                          // but here sendTextMessage uses context's activeChat by default.
+                          // We need to pass chatId to sendTextMessage if we want to forward to others.
+                          // Let's assume sendTextMessage can take a chatId or we use a more generic forward function.
+                          // Looking at context, sendTextMessage only sends to current chat.
+                          // I'll update context later to allow targetChatId if needed, 
+                          // but for now I'll just use the current context's functionality 
+                          // or implement it here directly with Firestore if needed.
+                          // Actually, I'll update MessengerContext to support targetChatId in sendTextMessage.
+                          
+                          // FOR NOW: just alert and close since I need to fix context first
+                          await handleForwardMessage(c.id);
+                        }}
+                        className="w-full flex items-center gap-3 p-3 hover:bg-white/[0.03] rounded-2xl transition group text-left"
+                      >
+                        <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 shrink-0 border border-white/5">
+                          <img src={c.type === 'direct' ? targetUser?.photoURL || undefined : c.photoURL || undefined} alt={chatName} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-slate-200 truncate">{chatName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono uppercase tracking-tight">
+                            {c.type === 'direct' ? `@${targetUser?.username || 'user'}` : `${c.members.length} members`}
+                          </div>
+                        </div>
+                        <Send className="w-4 h-4 text-slate-500 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                      </button>
+                    );
+                  })}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {floatingHearts.map(heart => (
+        <span 
+          key={heart.id} 
+          className="fixed text-4xl pointer-events-none select-none z-50 animate-float-heart"
+          style={{
+            left: heart.x - 20,
+            top: heart.y - 45,
+            transformOrigin: 'center'
+          }}
+        >
+          ❤️
+        </span>
+      ))}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-950/95 border border-cyan-500/35 text-[11.5px] font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2.5 text-slate-100 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none max-w-sm w-[90%]">

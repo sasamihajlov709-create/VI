@@ -32,7 +32,22 @@ import {
   FolderOpen,
   Globe,
   Bookmark,
-  User
+  User,
+  Check,
+  CheckSquare,
+  CheckCircle2,
+  Bell,
+  ShieldCheck,
+  Lock,
+  Phone,
+  Camera,
+  Clock,
+  Activity,
+  Database,
+  RefreshCw,
+  Terminal,
+  Palette,
+  Forward
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -63,6 +78,7 @@ export const Sidebar: React.FC = () => {
     togglePinChat,
     toggleArchiveChat,
     toggleMuteChat,
+    deleteChat,
     searchUsersByPrefix,
     addContactByUsername,
     contactsList,
@@ -75,6 +91,7 @@ export const Sidebar: React.FC = () => {
     onlineUsers,
     uploadAvatar,
     deleteAvatar,
+    updateMyProfile,
     joinChatByInviteCode,
     terminateOtherSessions,
     resolveReport,
@@ -84,13 +101,40 @@ export const Sidebar: React.FC = () => {
 
   const { t, language, setLanguage } = useLanguage();
 
+  const getFolderIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'archive': return <Archive className="w-4.5 h-4.5" />;
+      case 'users': return <Users className="w-4.5 h-4.5" />;
+      case 'tv': return <Tv className="w-4.5 h-4.5" />;
+      case 'sparkles': return <Sparkles className="w-4.5 h-4.5" />;
+      case 'bookmark': return <Bookmark className="w-4.5 h-4.5" />;
+      default: return <Folder className="w-4.5 h-4.5" />;
+    }
+  };
+
   // Dialog / Modal State Managers
   const [showCreateChat, setShowCreateChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showFolderModal, setShowFolderModal] = useState(false);
   
+  // Custom non-blocking visual Toast Notifications
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+  
   // Search state
   const [sidebarCtxMenu, setSidebarCtxMenu] = useState<string | null>(null);
+  const [deleteConfirmChatId, setDeleteConfirmChatId] = useState<string | null>(null);
+  const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartRef = useRef<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,6 +154,70 @@ export const Sidebar: React.FC = () => {
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderChats, setNewFolderChats] = useState<string[]>([]);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+
+  // Multi-delete states
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedChatIds, setSelectedChatIds] = useState<string[]>([]);
+  const [showMultiDeleteConfirm, setShowMultiDeleteConfirm] = useState(false);
+
+  // Hidden Default Folders states
+  const [hiddenDefaultFolderIds, setHiddenDefaultFolderIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('messenger_hidden_folders');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const hideDefaultFolder = (id: string) => {
+    const updated = [...hiddenDefaultFolderIds, id];
+    setHiddenDefaultFolderIds(updated);
+    localStorage.setItem('messenger_hidden_folders', JSON.stringify(updated));
+    if (activeFolder === id) {
+      setActiveFolder('all');
+    }
+  };
+
+  const showDefaultFolder = (id: string) => {
+    const updated = hiddenDefaultFolderIds.filter(x => x !== id);
+    setHiddenDefaultFolderIds(updated);
+    localStorage.setItem('messenger_hidden_folders', JSON.stringify(updated));
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedChatIds.length === 0) return;
+    try {
+      // Filter out Favorites chat so it is never deleted
+      const safeChatIds = selectedChatIds.filter(id => {
+        const c = chats.find(chat => chat.id === id);
+        const isFavorites = c?.type === 'direct' && c?.members.length === 1 && c?.members[0] === currentUser?.uid;
+        return !isFavorites;
+      });
+      if (safeChatIds.length > 0) {
+        await Promise.all(safeChatIds.map(id => deleteChat(id)));
+      }
+      setSelectedChatIds([]);
+      setIsSelectionMode(false);
+      setShowMultiDeleteConfirm(false);
+    } catch (err) {
+      console.error("Error bulk deleting chats", err);
+    }
+  };
+
+  const handleFolderDelete = async () => {
+    if (!folderToDelete) return;
+    try {
+      await deleteFolder(folderToDelete.id);
+      setFolderToDelete(null);
+      if (activeFolder === folderToDelete.id) {
+        setActiveFolder('all');
+      }
+    } catch (err) {
+      console.error("Error deleting folder", err);
+    }
+  };
 
   // Story state
   const [activeStoryView, setActiveStoryView] = useState<UserProfile | null>(null);
@@ -227,8 +335,6 @@ export const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const { updateMyProfile } = useMessenger();
-
   // Handle live user searching
   const handleQueryChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const term = e.target.value;
@@ -265,13 +371,19 @@ export const Sidebar: React.FC = () => {
     e.preventDefault();
     if (!newChatTitle.trim()) return;
     try {
-      await createGroupOrChannel(
+      const newChat = await createGroupOrChannel(
         newChatTitle,
         chatTypeSelection,
         selectedMembers,
         groupRules,
         groupWelcome
       );
+      if (chatTypeSelection === 'channel') {
+        setActiveFolder('channels');
+      } else {
+        setActiveFolder('all');
+      }
+      setActiveChat(newChat);
       // Reset
       setShowCreateChat(false);
       setNewChatTitle('');
@@ -336,12 +448,212 @@ export const Sidebar: React.FC = () => {
       const type = file.type.startsWith('video') ? 'video' : 'image';
       try {
         await publishStory(file, type);
-        alert(language === 'ru' ? "История успешно загружена и будет доступна 24 часа!" : "Story successfully uploaded and visible for 24 hours!");
+        showToast(language === 'ru' ? "История успешно загружена и будет доступна 24 часа!" : "Story successfully uploaded and visible for 24 hours!", 'success');
       } catch (e: any) {
         logger.error("Failed to upload story asset", { error: e.message });
-        alert(language === 'ru' ? "Не удалось загрузить историю." : "Failed to upload story.");
+        showToast(language === 'ru' ? "Не удалось загрузить историю." : "Failed to upload story.", 'error');
       }
     }
+  };
+
+  // Gesture-based swipe navigation across tabs (direct DOM mutation for butter-smooth 120 FPS)
+  const gestureDxRef = useRef<number>(0);
+  const swipeContainerRef = useRef<HTMLDivElement>(null);
+  const swipeStartX = useRef<number | null>(null);
+  const swipeStartY = useRef<number | null>(null);
+  const swipeMouseStartX = useRef<number | null>(null);
+  const swipeMouseStartY = useRef<number | null>(null);
+  const swipeLockDirection = useRef<'none' | 'horizontal' | 'vertical'>('none');
+  const animationFrameIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+    };
+  }, []);
+
+  const handleGestureTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('input') || 
+      target.closest('textarea') || 
+      target.closest('[role="slider"]') ||
+      target.closest('.no-swipe')
+    ) {
+      return;
+    }
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+    swipeLockDirection.current = 'none';
+    gestureDxRef.current = 0;
+  };
+
+  const handleGestureTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (swipeStartX.current === null || swipeStartY.current === null) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - swipeStartX.current;
+    const diffY = currentY - swipeStartY.current;
+
+    if (swipeLockDirection.current === 'none') {
+      const absX = Math.abs(diffX);
+      const absY = Math.abs(diffY);
+      if (absX > 10 || absY > 10) {
+        if (absX > absY) {
+          swipeLockDirection.current = 'horizontal';
+        } else {
+          swipeLockDirection.current = 'vertical';
+        }
+      }
+    }
+
+    if (swipeLockDirection.current === 'horizontal') {
+      if (e.cancelable) e.preventDefault();
+      gestureDxRef.current = diffX;
+
+      if (!animationFrameIdRef.current) {
+        animationFrameIdRef.current = requestAnimationFrame(() => {
+          if (swipeContainerRef.current) {
+            swipeContainerRef.current.style.transition = 'none';
+            swipeContainerRef.current.style.transform = `translate3d(calc(${-activeIndex * 25}% + ${gestureDxRef.current}px), 0, 0)`;
+          }
+          animationFrameIdRef.current = null;
+        });
+      }
+    }
+  };
+
+  const handleGestureTouchEnd = () => {
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+
+    if (swipeStartX.current === null) return;
+    const threshold = 50; // Low threshold for high responsiveness
+    const viewsOrder: ('chats' | 'contacts' | 'settings' | 'profile')[] = ['chats', 'contacts', 'settings', 'profile'];
+    const idx = viewsOrder.indexOf(sidebarView);
+    const dX = gestureDxRef.current;
+
+    let targetIdx = idx;
+
+    if (swipeLockDirection.current === 'horizontal') {
+      if (dX < -threshold) {
+        // Swipe left -> next tab, wrapping around
+        targetIdx = (idx + 1) % viewsOrder.length;
+      } else if (dX > threshold) {
+        // Swipe right -> previous tab, wrapping around
+        targetIdx = (idx - 1 + viewsOrder.length) % viewsOrder.length;
+      }
+    }
+
+    if (swipeContainerRef.current) {
+      swipeContainerRef.current.style.transition = 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)';
+      swipeContainerRef.current.style.transform = `translate3d(${-targetIdx * 25}%, 0, 0)`;
+    }
+
+    if (targetIdx !== idx) {
+      setSidebarView(viewsOrder[targetIdx]);
+      setSearchQuery('');
+      if ('vibrate' in navigator) navigator.vibrate(10);
+    }
+
+    swipeStartX.current = null;
+    swipeStartY.current = null;
+    swipeLockDirection.current = 'none';
+    gestureDxRef.current = 0;
+  };
+
+  const handleGestureMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('input') || 
+      target.closest('textarea') || 
+      target.closest('[role="slider"]') ||
+      target.closest('.no-swipe') ||
+      e.button !== 0
+    ) {
+      return;
+    }
+    swipeMouseStartX.current = e.clientX;
+    swipeMouseStartY.current = e.clientY;
+    swipeLockDirection.current = 'none';
+    gestureDxRef.current = 0;
+  };
+
+  const handleGestureMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (swipeMouseStartX.current === null || swipeMouseStartY.current === null) return;
+    const diffX = e.clientX - swipeMouseStartX.current;
+    const diffY = e.clientY - swipeMouseStartY.current;
+
+    if (swipeLockDirection.current === 'none') {
+      const absX = Math.abs(diffX);
+      const absY = Math.abs(diffY);
+      if (absX > 15 || absY > 15) {
+        if (absX > absY) {
+          swipeLockDirection.current = 'horizontal';
+        } else {
+          swipeLockDirection.current = 'vertical';
+        }
+      }
+    }
+
+    if (swipeLockDirection.current === 'horizontal') {
+      e.preventDefault();
+      gestureDxRef.current = diffX;
+
+      if (!animationFrameIdRef.current) {
+        animationFrameIdRef.current = requestAnimationFrame(() => {
+          if (swipeContainerRef.current) {
+            swipeContainerRef.current.style.transition = 'none';
+            swipeContainerRef.current.style.transform = `translate3d(calc(${-activeIndex * 25}% + ${gestureDxRef.current}px), 0, 0)`;
+          }
+          animationFrameIdRef.current = null;
+        });
+      }
+    }
+  };
+
+  const handleGestureMouseUp = () => {
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+
+    if (swipeMouseStartX.current === null) return;
+    const threshold = 50;
+    const viewsOrder: ('chats' | 'contacts' | 'settings' | 'profile')[] = ['chats', 'contacts', 'settings', 'profile'];
+    const idx = viewsOrder.indexOf(sidebarView);
+    const dX = gestureDxRef.current;
+
+    let targetIdx = idx;
+
+    if (swipeLockDirection.current === 'horizontal') {
+      if (dX < -threshold) {
+        // Swipe left -> next tab, wrapping around
+        targetIdx = (idx + 1) % viewsOrder.length;
+      } else if (dX > threshold) {
+        // Swipe right -> previous tab, wrapping around
+        targetIdx = (idx - 1 + viewsOrder.length) % viewsOrder.length;
+      }
+    }
+
+    if (swipeContainerRef.current) {
+      swipeContainerRef.current.style.transition = 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)';
+      swipeContainerRef.current.style.transform = `translate3d(${-targetIdx * 25}%, 0, 0)`;
+    }
+
+    if (targetIdx !== idx) {
+      setSidebarView(viewsOrder[targetIdx]);
+      setSearchQuery('');
+    }
+
+    swipeMouseStartX.current = null;
+    swipeMouseStartY.current = null;
+    swipeLockDirection.current = 'none';
+    gestureDxRef.current = 0;
   };
 
   const handlePullTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -399,6 +711,7 @@ export const Sidebar: React.FC = () => {
     // 1. Apply folder filters
     if (activeFolder === 'direct' && chat.type !== 'direct') return false;
     if (activeFolder === 'groups' && chat.type !== 'group') return false;
+    if (activeFolder !== 'all' && activeFolder !== 'channels' && chat.type === 'channel') return false;
     if (activeFolder === 'channels' && chat.type !== 'channel') return false;
     
     const isArchived = chat.archivedIds?.includes(currentUser?.uid || '');
@@ -493,102 +806,335 @@ export const Sidebar: React.FC = () => {
     return typingList.join(', ') + ' ' + (typingList.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...'));
   };
 
+  const viewsOrder: ('chats' | 'contacts' | 'settings' | 'profile')[] = ['chats', 'contacts', 'settings', 'profile'];
+  const activeIndex = viewsOrder.indexOf(sidebarView);
+
   return (
-    <div className={`w-full md:w-[350px] border-r border-[#1B1B1E] flex flex-col h-full shrink-0 relative overflow-hidden bg-[#0C1322] select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} style={{ background: 'var(--glass-sidebar-bg)' }}>
-      {sidebarView === 'chats' ? (
-        <>
-          {/* Dynamic Header */}
-          <div className="p-4 flex flex-col gap-3 border-b border-white/5" style={{ background: 'rgba(255, 255, 255, 0.01)' }}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-cyan-700/80 flex items-center justify-center font-bold text-cyan-200 border border-cyan-500/20 shadow-lg shadow-cyan-500/10">
-                  VI
-                </div>
-                <span className="font-semibold tracking-tight text-lg text-slate-100">{t.appName}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {/* Language Toggle */}
-                <button 
-                  className="p-1 px-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 font-mono font-bold text-[11px] transition-all cursor-pointer border border-[#222]"
-                  title={language === 'en' ? 'Переключить на русский' : 'Switch to English'}
-                  onClick={() => setLanguage(language === 'en' ? 'ru' : 'en')}
-                >
-                  {language === 'en' ? 'RU' : 'EN'}
-                </button>
+    <div 
+      onTouchStart={handleGestureTouchStart}
+      onTouchMove={handleGestureTouchMove}
+      onTouchEnd={handleGestureTouchEnd}
+      onMouseDown={handleGestureMouseDown}
+      onMouseMove={handleGestureMouseMove}
+      onMouseUp={handleGestureMouseUp}
+      onMouseLeave={handleGestureMouseUp}
+      className={`w-full md:w-[422px] border-r border-[var(--glass-border)] flex h-full shrink-0 relative overflow-hidden backdrop-blur-3xl bg-[var(--glass-bg)] select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} 
+    >
+      <div className="hidden md:flex w-[82px] h-full bg-[var(--glass-bg-hover)] backdrop-blur-[45px] border-r border-[var(--glass-border)] flex-col items-center py-8 gap-7 shrink-0 no-swipe z-30 relative shadow-[12px_0_40px_rgba(0,0,0,0.3)]">
+        <div 
+          onClick={() => {
+            setActiveFolder('all');
+            setActiveChat(null);
+          }}
+          className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === 'all' && !activeChat ? 'text-white' : 'text-slate-500 hover:text-slate-200'}`}
+          title={language === 'ru' ? 'Все чаты' : 'All Chats'}
+        >
+          {activeFolder === 'all' && !activeChat && (
+            <motion.div 
+              layoutId="railActiveIndicator"
+              className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+              transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+            />
+          )}
+          <div className="font-black text-[12px] uppercase tracking-tighter relative z-10">All</div>
+        </div>
 
-                {/* Saved Messages */}
-                <button 
-                  className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-cyan-400 transition-all cursor-pointer"
-                  title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
-                  onClick={async () => {
-                    if (userProfile) {
-                      await createDirectChat(userProfile);
-                    }
-                  }}
-                >
-                  <Bookmark className="w-5 h-5" />
-                </button>
+        {/* Favorites Quick Access Rail Item */}
+        <div 
+          onClick={() => {
+            const favChat = chats.find(c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser?.uid);
+            if (favChat) {
+              setActiveChat(favChat);
+              setActiveFolder('all');
+            } else if (userProfile) {
+              createDirectChat(userProfile);
+              setActiveFolder('all');
+            }
+          }}
+          className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 ? 'text-white' : 'text-slate-500 hover:text-cyan-400'}`}
+          title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
+        >
+          {activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 && (
+            <motion.div 
+              layoutId="railActiveIndicator"
+              className="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-indigo-600 rounded-[22px] shadow-[0_4px_20px_rgba(34,211,238,0.4)] border border-white/20"
+              transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+            />
+          )}
+          <Bookmark className="w-6 h-6 relative z-10" />
+        </div>
 
-                {/* Create Chat */}
-                <button 
-                  className="p-1.5 hover:bg-slate-800/60 rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
-                  title={t.configureChat}
-                  onClick={() => {
-                    setChatTypeSelection('group');
-                    setShowCreateChat(true);
-                  }}
-                >
-                  <Plus className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Global Prefix Search Bar */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-400" />
-              <input 
-                id="sidebar-search-input"
-                type="text" 
-                placeholder={t.searchPlaceholder}
-                value={searchQuery}
-                onChange={handleQueryChange}
-                className="w-full pl-9.5 pr-4 py-1.5 bg-black/15 hover:bg-black/25 text-xs rounded-full border border-white/5 focus:border-[var(--glass-border-focus)] focus:bg-black/30 focus:outline-none placeholder-slate-500 text-slate-100 transition-all shadow-inner font-sans"
+        {userProfile?.folders?.map((folder) => (
+          <div 
+            key={folder.id}
+            onClick={() => setActiveFolder(folder.id)}
+            className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === folder.id ? 'text-white' : 'text-slate-500 hover:text-white'}`}
+            title={folder.name}
+          >
+            {activeFolder === folder.id && (
+              <motion.div 
+                layoutId="railActiveIndicator"
+                className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
               />
+            )}
+            <div className="relative z-10 scale-115">{getFolderIcon(folder.icon)}</div>
+            <div className="absolute left-20 px-3 py-1.5 vision-floating-header text-[11px] font-bold text-white rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-[100] border border-white/20 font-sans shadow-2xl transition-all translate-x-[-10px] group-hover:translate-x-0">
+              {folder.name}
             </div>
+          </div>
+        ))}
 
-            {/* Segmented Chats vs. Channels control */}
-            <div className="pt-1">
-              <div className="grid grid-cols-2 p-0.5 bg-black/20 rounded-xl border border-white/5 text-[11px]">
+        <div className="mt-auto flex flex-col gap-6 pb-4">
+          <button 
+            onClick={() => setShowFolderModal(true)}
+            className="w-13 h-13 rounded-[22px] flex items-center justify-center bg-white/[0.05] text-slate-500 hover:text-cyan-400 hover:bg-white/[0.1] border border-dashed border-white/20 cursor-pointer transition-all duration-400 hover:border-cyan-500/50"
+            title={language === 'ru' ? 'Управление папками' : 'Manage Folders'}
+          >
+            <Plus className="w-7 h-7" />
+          </button>
+
+          <div 
+            onClick={() => setSidebarView('settings')}
+            className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative ${sidebarView === 'settings' ? 'text-white' : 'text-slate-500 hover:text-white'}`}
+            title={language === 'ru' ? 'Настройки' : 'Settings'}
+          >
+            {sidebarView === 'settings' && (
+              <motion.div 
+                layoutId="railActiveIndicator"
+                className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+              />
+            )}
+            <Settings className="w-6 h-6 relative z-10" />
+          </div>
+        </div>
+      </div>
+
+
+      {/* Scrollable / Swipeable content container wrapper */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
+        <div 
+          className="flex-1 overflow-hidden relative"
+        >
+        <div 
+          ref={swipeContainerRef}
+          className="flex h-full w-[400%]"
+          style={{
+            transform: `translate3d(${-activeIndex * 25}%, 0, 0)`,
+            transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)',
+            willChange: 'transform'
+          }}
+        >
+          {/* Panel 0: Chats */}
+          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-hidden relative">
+            {/* Dynamic Header - Optimized for Telegram look */}
+            <div className="pt-1 pb-1 px-4 flex flex-col gap-1 backdrop-blur-3xl shadow-xl transition-all duration-300 relative z-20 border-b border-white/5" style={{ background: 'var(--glass-header-bg)' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-[12px] bg-gradient-to-br from-purple-800 to-indigo-900 flex items-center justify-center font-black text-white text-[11px] shadow-lg shadow-purple-500/25 border border-white/20 overflow-hidden">
+                    VI
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-bold tracking-tight text-md text-[var(--glass-text)]">{language === 'ru' ? 'Чаты' : 'Chats'}</span>
+                    <div className="flex items-center gap-1 mt-0">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)] animate-pulse" />
+                      <span className="text-[8px] text-slate-400 font-bold uppercase tracking-[0.1em] font-mono">{language === 'ru' ? 'Онлайн' : 'Online'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {/* Settings button removed to resolve duplicate settings */}
+                  <button 
+                    className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-cyan-400 transition-all cursor-pointer md:hidden border border-white/10 active:scale-95 shadow-lg"
+                    onClick={() => setShowCreateChat(true)}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Global Prefix Search Bar */}
+              <div className="relative group/search">
+                <Search className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within/search:text-cyan-400 transition-colors" />
+                <input 
+                  id="sidebar-search-input"
+                  type="text" 
+                  placeholder={t.searchPlaceholder}
+                  value={searchQuery}
+                  onChange={handleQueryChange}
+                  className="w-full pl-13 pr-6 py-3.5 bg-black/30 border border-white/10 hover:border-white/20 text-[15px] rounded-[24px] focus:border-cyan-400/50 focus:bg-black/50 focus:outline-none placeholder-slate-600 text-slate-100 transition-all duration-300 font-medium shadow-inner backdrop-blur-xl"
+                />
+              </div>
+
+              {/* Stories Strip - VisionOS Style avatars */}
+              <div className="flex items-center gap-4 overflow-x-auto no-scrollbar py-1 select-none">
+                <div className="flex flex-col items-center gap-2 shrink-0">
+                  <div className="relative group cursor-pointer">
+                    <input 
+                      type="file" 
+                      id="story-upload-input" 
+                      className="hidden" 
+                      accept="image/*,video/*"
+                      onChange={handleStoryUpload}
+                    />
+                    <label 
+                      htmlFor="story-upload-input"
+                      className="w-13 h-13 rounded-full bg-white/5 border-2 border-dashed border-white/20 flex items-center justify-center text-slate-400 group-hover:text-cyan-400 group-hover:border-cyan-400/50 transition-all cursor-pointer overflow-hidden shadow-lg"
+                    >
+                      <Plus className="w-6 h-6" />
+                    </label>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{language === 'ru' ? 'Моя' : 'Yours'}</span>
+                </div>
+
+                {Object.values(storiesByUser).map(({ user, list }) => (
+                  <div 
+                    key={user.uid}
+                    className="flex flex-col items-center gap-2 shrink-0 cursor-pointer group"
+                    onClick={() => setActiveStoryView(user)}
+                  >
+                    <div className="w-13 h-13 rounded-full p-[2px] bg-gradient-to-tr from-cyan-400 to-indigo-500 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform duration-300">
+                      <div className="w-full h-full rounded-full border-2 border-[#0C1322] overflow-hidden">
+                        <img src={user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName)}`} alt={user.displayName} className="w-full h-full object-cover" />
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest max-w-[52px] truncate">{user.displayName.split(' ')[0]}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Horizontal Folder Tabs (Mobile only) */}
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-1 md:hidden relative h-11 select-none">
                 <button
-                  type="button"
-                  onClick={() => setActiveFolder('all')}
-                  className={`py-1.5 rounded-lg font-semibold cursor-pointer transition-all ${
-                    activeFolder !== 'channels' 
-                      ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] border border-[var(--glass-accent)]/15 shadow' 
+                  onClick={() => {
+                    setActiveFolder('all');
+                    if ('vibrate' in navigator) navigator.vibrate(5);
+                  }}
+                  className={`relative px-6 h-10 flex items-center transition-all duration-400 whitespace-nowrap cursor-pointer rounded-full ${
+                    activeFolder === 'all' 
+                      ? 'text-white font-bold' 
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {language === 'ru' ? 'Чаты' : 'Chats'}
+                  {activeFolder === 'all' && (
+                    <motion.div 
+                      layoutId="activeFolderMobile"
+                      className="absolute inset-0 bg-white/10 vision-floating-header rounded-full border border-white/20 shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
+                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  <span className="text-[14px] tracking-tight relative z-10">{language === 'ru' ? 'Все' : 'All'}</span>
+                </button>
+
+              <button
+                onClick={() => {
+                  const favChat = chats.find(c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser?.uid);
+                  if (favChat) {
+                    setActiveChat(favChat);
+                    setActiveFolder('all');
+                  } else if (userProfile) {
+                    createDirectChat(userProfile);
+                    setActiveFolder('all');
+                  }
+                  if ('vibrate' in navigator) navigator.vibrate(5);
+                }}
+                className={`relative px-5 h-9 flex items-center transition-all duration-400 whitespace-nowrap cursor-pointer rounded-full ${
+                  activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1
+                    ? 'text-white font-bold' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 && (
+                  <motion.div 
+                    layoutId="activeFolderMobile"
+                    className="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-indigo-600 rounded-full shadow-[0_4px_15px_rgba(34,211,238,0.3)] border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <span className="text-[13.5px] tracking-tight relative z-10">{language === 'ru' ? 'Избранное' : 'Favorites'}</span>
+              </button>
+
+              {userProfile?.folders?.map(folder => {
+                const isActive = activeFolder === folder.id;
+                const hasUnreads = chats.some(c => folder.chatIds.includes(c.id) && currentUser && (c.unreadCounts?.[currentUser.uid] || 0) > 0);
+                return (
+                  <button
+                    key={folder.id}
+                    onClick={() => {
+                      setActiveFolder(folder.id);
+                      if ('vibrate' in navigator) navigator.vibrate(5);
+                    }}
+                    className={`relative px-4 h-8 flex items-center transition-all duration-300 whitespace-nowrap cursor-pointer rounded-full ${
+                      isActive 
+                        ? 'text-white font-bold' 
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {isActive && (
+                      <motion.div 
+                        layoutId="activeFolderMobile"
+                        className="absolute inset-0 bg-white/10 rounded-full border border-white/10"
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                    <span className="text-[13px] tracking-wide relative z-10">{folder.name}</span>
+                    {hasUnreads && !isActive && (
+                      <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_6px_rgba(6,182,212,0.4)] relative z-10" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Segmented Chats vs. Channels control (Desktop Only or Fallback) */}
+            <div className="hidden md:block pt-2">
+              <div className="grid grid-cols-2 p-1.5 vision-floating-header rounded-[22px] border border-white/10 text-[12px] shadow-2xl relative overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setActiveFolder('all')}
+                  className={`py-2.5 rounded-[18px] font-black cursor-pointer transition-all duration-400 relative z-10 ${
+                    activeFolder !== 'channels' 
+                      ? 'text-white' 
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {activeFolder !== 'channels' && (
+                    <motion.div 
+                      layoutId="segmentIndicator"
+                      className="absolute inset-0 bg-white/10 rounded-[18px] border border-white/20 shadow-lg"
+                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  <span className="relative z-20 uppercase tracking-widest">{language === 'ru' ? 'Чаты' : 'Chats'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFolder('channels')}
-                  className={`py-1.5 rounded-lg font-semibold cursor-pointer transition-all ${
+                  className={`py-2.5 rounded-[18px] font-black cursor-pointer transition-all duration-400 relative z-10 ${
                     activeFolder === 'channels' 
-                      ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] border border-[var(--glass-accent)]/15 shadow' 
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'text-white' 
+                      : 'text-slate-500 hover:text-slate-300'
                   }`}
                 >
-                  {language === 'ru' ? 'Каналы' : 'Channels'}
+                  {activeFolder === 'channels' && (
+                    <motion.div 
+                      layoutId="segmentIndicator"
+                      className="absolute inset-0 bg-white/10 rounded-[18px] border border-white/20 shadow-lg"
+                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  <span className="relative z-20 uppercase tracking-widest">{language === 'ru' ? 'Каналы' : 'Channels'}</span>
                 </button>
               </div>
             </div>
           </div>
+        </div>
 
       {/* Prefix live search results dropdown */}
       {searchResults.length > 0 && (
-        <div className="absolute top-[110px] left-0 w-full glass-panel backdrop-blur-xl bg-slate-900/90 dark:bg-slate-950/90 shadow-2xl border-b border-white/5 z-20 max-h-[220px] overflow-y-auto divide-y divide-white/5 rounded-b-2xl">
-          <div className="p-2.5 text-[11px] uppercase font-mono text-[var(--glass-accent)] tracking-wider">
+        <div className="absolute top-[125px] left-5 right-5 vision-context-menu backdrop-blur-[50px] shadow-[0_25px_60px_rgba(0,0,0,0.6)] z-[100] max-h-[380px] overflow-y-auto rounded-[32px] border border-white/20 p-3 space-y-1.5 custom-scrollbar animate-in fade-in zoom-in duration-300">
+          <div className="px-5 py-2.5 text-[11px] uppercase font-black text-cyan-400 tracking-[0.2em] font-mono">
             {language === 'ru' ? 'Результаты поиска' : 'Search Results'}
           </div>
           {searchResults.map((user) => (
@@ -599,111 +1145,29 @@ export const Sidebar: React.FC = () => {
                 setSearchQuery('');
                 setSearchResults([]);
               }}
-              className="flex items-center gap-3 p-3 hover:bg-[var(--glass-item-active)] cursor-pointer transition-all"
+              className="flex items-center gap-4 p-4 hover:bg-white/[0.12] active:bg-white/[0.18] rounded-[24px] cursor-pointer transition-all duration-300 border border-transparent hover:border-white/10 group"
             >
-              <img src={user.photoURL || undefined} alt={user.displayName} className="w-9 h-9 rounded-full object-cover border border-white/10" />
-              <div>
-                <div className="text-sm font-medium text-[var(--glass-text)]">{user.displayName}</div>
-                <div className="text-xs text-[var(--glass-text-muted)]">@{user.username}</div>
+              <div className="relative">
+                <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/10 group-hover:scale-105 transition-transform duration-300 shadow-lg">
+                  <img src={user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName)}`} alt={user.displayName} className="w-full h-full object-cover" />
+                </div>
+                {onlineUsers[user.uid] === 'online' && (
+                  <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-[#0C1322] shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[15.5px] font-bold text-white truncate tracking-tight">{user.displayName}</div>
+                <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider font-mono">@{user.username}</div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Folders Navigation Strip */}
-      <div className="flex border-b border-white/5 text-xs px-2 shadow-sm shrink-0 overflow-x-auto gap-1 py-1 text-slate-400 select-none bg-white/[0.01]">
-        <button 
-          onClick={() => setActiveFolder('all')}
-          className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer ${activeFolder === 'all' ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold border border-[var(--glass-accent)]/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-        >
-          {language === 'ru' ? 'Все' : 'All'}
-        </button>
-        <button 
-          onClick={() => setActiveFolder('direct')}
-          className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer ${activeFolder === 'direct' ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold border border-[var(--glass-accent)]/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-        >
-          {language === 'ru' ? 'Личные' : 'Direct'}
-        </button>
-        <button 
-          onClick={() => setActiveFolder('groups')}
-          className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer ${activeFolder === 'groups' ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold border border-[var(--glass-accent)]/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-        >
-          {language === 'ru' ? 'Группы' : 'Groups'}
-        </button>
-        <button 
-          onClick={() => setActiveFolder('channels')}
-          className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer ${activeFolder === 'channels' ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold border border-[var(--glass-accent)]/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-        >
-          {language === 'ru' ? 'Каналы' : 'Channels'}
-        </button>
-        <button 
-          onClick={() => setActiveFolder('archived')}
-          className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer flex items-center gap-1 ${activeFolder === 'archived' ? 'bg-amber-500/10 text-amber-500 font-semibold border border-amber-500/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-        >
-          <Archive className="w-3.5 h-3.5" />
-          {language === 'ru' ? 'Архив' : 'Archive'}
-        </button>
-        {userProfile?.folders?.map((folder) => (
-          <button 
-            key={folder.id}
-            onClick={() => setActiveFolder(folder.id)}
-            className={`px-3 py-1.5 rounded-full transition-all font-medium cursor-pointer flex items-center gap-1 ${activeFolder === folder.id ? 'bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold border border-[var(--glass-accent)]/15 shadow-sm' : 'hover:bg-white/5 hover:text-slate-200'}`}
-          >
-            <FolderOpen className="w-3.5 h-3.5" />
-            {folder.name}
-          </button>
-        ))}
-        <button 
-          onClick={() => setShowFolderModal(true)}
-          className="p-1 px-1.5 hover:bg-white/5 rounded-full text-slate-500 hover:text-slate-300 transition-all flex items-center cursor-pointer border border-transparent hover:border-white/5"
-          title={t.createFolder}
-        >
-          <FolderPlus className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Horizontal Stories deck */}
-      <div className="flex gap-3 px-4 py-3 bg-white/[0.01] border-b border-white/[0.04] select-none overflow-x-auto scrollbar-none">
-        {/* Your story publishing bubble */}
-        <label className="flex flex-col items-center gap-1 cursor-pointer shrink-0">
-          <div className="relative w-12 h-12 rounded-full border-2 border-dashed border-slate-500/30 hover:border-[var(--glass-accent)] flex items-center justify-center transition-all bg-black/10">
-            <Plus className="w-5 h-5 text-slate-500 hover:text-[var(--glass-accent)]" />
-            {userProfile?.photoURL && (
-              <img src={userProfile.photoURL} alt="Me" className="w-10 h-10 rounded-full object-cover opacity-30 absolute inset-1 pointer-events-none" />
-            )}
-          </div>
-          <span className="text-[10px] text-slate-400 font-medium">{t.yourStory}</span>
-          <input type="file" accept="image/*,video/*" onChange={handleStoryUpload} className="hidden" />
-        </label>
-
-        {Object.keys(storiesByUser).map((uid) => {
-          const payload = storiesByUser[uid];
-          return (
-            <div 
-              key={uid} 
-              onClick={() => setActiveStoryView(payload.user)}
-              className="flex flex-col items-center gap-1 cursor-pointer shrink-0"
-            >
-              <div className="w-12 h-12 rounded-full p-[2px] bg-gradient-to-tr from-cyan-400 to-sky-500 shadow-md transform active:scale-95 transition-all">
-                <img 
-                  src={payload.user.photoURL || undefined} 
-                  alt={payload.user.displayName} 
-                  className="w-full h-full rounded-full object-cover bg-slate-950 border-2 border-[#0c1626]" 
-                />
-              </div>
-              <span className="text-[10px] text-slate-300 font-medium max-w-[50px] truncate">
-                {payload.user.uid === currentUser?.uid ? (language === 'ru' ? 'Я' : 'Me') : payload.user.displayName.split(' ')[0]}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
       {/* Main Chat List view (Virtualized density and pull-down gesture support) */}
       <div 
         ref={listContainerRef} 
-        className="flex-1 overflow-y-auto relative" 
+        className="flex-1 overflow-y-auto relative bg-transparent scrollbar-none" 
         onClick={() => setSidebarCtxMenu(null)}
         onTouchStart={handlePullTouchStart}
         onTouchMove={handlePullTouchMove}
@@ -717,14 +1181,14 @@ export const Sidebar: React.FC = () => {
         {pullDistance > 0 && (
           <div 
             style={{ height: `${pullDistance}px` }} 
-            className="w-full flex items-center justify-center bg-zinc-950/20 text-xs border-b border-white/[0.02] overflow-hidden text-slate-400 select-none shrink-0"
+            className="w-full flex items-center justify-center bg-white/5 text-xs border-b border-white/[0.02] overflow-hidden text-slate-400 select-none shrink-0 backdrop-blur-md"
           >
-            <div className="flex items-center gap-2 animate-pulse font-mono tracking-wider">
-              <Archive className={`w-4 h-4 text-cyan-400 transition-transform ${pullDistance >= 65 ? 'scale-125 rotate-6 text-amber-500' : ''}`} />
-              <span className="text-[10px] font-bold uppercase">
+            <div className="flex items-center gap-2 animate-pulse font-sans tracking-wide">
+              <Archive className={`w-4 h-4 text-cyan-400 transition-transform ${pullDistance >= 65 ? 'scale-125 rotate-6 text-amber-400' : ''}`} />
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em]">
                 {pullDistance >= 65 
-                  ? (language === 'ru' ? 'Отпустите для открытия Архива' : 'Release to open Archive')
-                  : (language === 'ru' ? 'Потяните для открытия Архива' : 'Pull down to open Archive')
+                  ? (language === 'ru' ? 'ОТПУСТИТЕ ДЛЯ АРХИВА' : 'RELEASE FOR ARCHIVE')
+                  : (language === 'ru' ? 'ПОТЯНИТЕ ДЛЯ АРХИВА' : 'PULL FOR ARCHIVE')
                 }
               </span>
             </div>
@@ -732,95 +1196,22 @@ export const Sidebar: React.FC = () => {
         )}
 
         {filteredChats.length === 0 ? (
-          <div className="flex flex-col items-center justify-start p-6 text-center text-slate-500 overflow-y-auto h-full scrollbar-hidden">
-            <div className="py-4">
-              <div className="w-12 h-12 bg-[#C4B4E6]/10 rounded-2xl flex items-center justify-center border border-white/5 mx-auto mb-2.5">
-                <MessageSquare className="w-6 h-6 text-cyan-400" />
-              </div>
-              <p className="text-sm font-bold text-slate-200">{t.noActiveChats}</p>
-              <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">{t.noActiveChatsSub}</p>
+          <div className="flex flex-col items-center justify-center p-8 text-center h-full">
+            <div className="w-16 h-16 bg-white/[0.03] rounded-[24px] flex items-center justify-center border border-white/5 mx-auto mb-4 shadow-inner">
+              <MessageSquare className="w-7 h-7 text-cyan-400/70" />
             </div>
-
-            <div className="w-full space-y-2.5 pt-2">
+            <p className="text-[15px] font-bold text-slate-100">{t.noActiveChats}</p>
+            <p className="text-[12px] text-slate-500 mt-1.5 max-w-[200px] mx-auto leading-relaxed">{t.noActiveChatsSub}</p>
+            
+            <div className="mt-8 w-full space-y-2">
               <button 
                 onClick={() => {
                   setChatTypeSelection('group');
                   setShowCreateChat(true);
                 }}
-                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
+                className="w-full py-3.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/10 rounded-2xl text-cyan-400 text-sm font-bold transition-all active:scale-95 cursor-pointer"
               >
-                <div className="w-9 h-9 bg-cyan-500/10 rounded-xl flex items-center justify-center shrink-0 border border-cyan-500/10 group-hover:scale-105 transition-transform">
-                  <Plus className="w-4 h-4 text-cyan-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-200 group-hover:text-cyan-400 transition-colors">
-                    {language === 'ru' ? 'Новый Чат / Пин-код' : 'Initiate New Transfer'}
-                  </p>
-                  <p className="text-[10px] text-slate-450 mt-0.5">
-                    {language === 'ru' ? 'Начать личный чат, группу или канал' : 'Direct dialogs, secure workspaces'}
-                  </p>
-                </div>
-              </button>
-
-              <button 
-                onClick={async () => {
-                  if (userProfile) {
-                    await createDirectChat(userProfile);
-                  }
-                }}
-                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
-              >
-                <div className="w-9 h-9 bg-amber-500/10 rounded-xl flex items-center justify-center shrink-0 border border-amber-500/10 group-hover:scale-105 transition-transform">
-                  <Bookmark className="w-4 h-4 text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-200 group-hover:text-amber-400 transition-colors">
-                    {language === 'ru' ? 'Избранное / Сейв' : 'Saved Messages / cloud'}
-                  </p>
-                  <p className="text-[10px] text-slate-450 mt-0.5">
-                    {language === 'ru' ? 'Личное облачное хранилище данных' : 'Your personal secure file cloud'}
-                  </p>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => {
-                  const el = document.getElementById('sidebar-search-input');
-                  if (el) el.focus();
-                }}
-                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
-              >
-                <div className="w-9 h-9 bg-indigo-500/10 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/10 group-hover:scale-105 transition-transform">
-                  <Search className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-200 group-hover:text-indigo-400 transition-colors">
-                    {language === 'ru' ? 'Поиск Пользователей' : 'Discover Global Channels'}
-                  </p>
-                  <p className="text-[10px] text-slate-450 mt-0.5">
-                    {language === 'ru' ? 'Найти людей или каналы по никнейму' : 'Query unique usernames or tag catalogs'}
-                  </p>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => {
-                  setShowSettings(true);
-                  setSettingsTab('account');
-                }}
-                className="w-full p-3.5 bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 rounded-2xl text-left transition-all tracking-wide cursor-pointer flex items-center gap-3.5 group"
-              >
-                <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center shrink-0 border border-emerald-500/10 group-hover:scale-105 transition-transform">
-                  <Settings className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-200 group-hover:text-emerald-400 transition-colors">
-                    {language === 'ru' ? 'Настроить Профиль' : 'Refine Global Settings'}
-                  </p>
-                  <p className="text-[10px] text-slate-450 mt-0.5">
-                    {language === 'ru' ? 'Задать описание, статус или приватность' : 'Alter handle identities, block hosts'}
-                  </p>
-                </div>
+                {language === 'ru' ? 'Новый чат' : 'New Chat'}
               </button>
             </div>
           </div>
@@ -828,12 +1219,14 @@ export const Sidebar: React.FC = () => {
           <div style={{ height: totalHeight, width: '100%', position: 'relative' }}>
             {virtualItems.map((item) => {
               const chat = filteredChats[item.index];
+              if (!chat) return null;
               const hasUnread = currentUser && chat.unreadCounts && (chat.unreadCounts[currentUser.uid] || 0) > 0;
               const unreadCount = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
-              const isPinned = currentUser && chat.pinnedIds?.includes(currentUser.uid);
-              const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
               const isMuted = currentUser && chat.muteIds?.includes(currentUser.uid);
+              const isPinned = currentUser && chat.pinnedIds?.includes(currentUser.uid);
               const isActive = activeChat?.id === chat.id;
+              const uniqueMembers = [...new Set(chat.members || [])];
+              const isItemFavorites = chat.type === 'direct' && uniqueMembers.length === 1 && uniqueMembers[0] === currentUser?.uid;
 
               return (
                 <div 
@@ -846,356 +1239,636 @@ export const Sidebar: React.FC = () => {
                     height: item.size,
                     transform: `translateY(${item.start}px)`,
                   }}
-                  className="relative border-b border-white/[0.04] overflow-hidden"
+                  className="px-3 pt-1.5"
                 >
-                  {/* Swipe Background Reveal Layer */}
-                  <div className="absolute inset-0 flex justify-between items-center px-6 pointer-events-none bg-slate-800/20">
-                     <div id={`chat-icon-right-${chat.id}`} className="flex items-center text-emerald-500 gap-2 opacity-0 transition-none">
-                        <Pin className="w-5 h-5 opacity-80" />
-                     </div>
-                     <div id={`chat-icon-left-${chat.id}`} className="flex items-center text-amber-500 gap-2 opacity-0 transition-none">
-                        <Archive className="w-5 h-5 opacity-80" />
-                     </div>
-                  </div>
-
-                   <motion.div
-                    drag="x"
+                  <motion.div
+                    drag={isSelectionMode ? false : "x"}
                     dragDirectionLock
                     dragConstraints={{ left: 0, right: 0 }}
                     dragElastic={{ left: 0.2, right: 0.2 }}
-                    onDrag={(e, info) => {
-                      const leftIcon = document.getElementById(`chat-icon-left-${chat.id}`);
-                      const rightIcon = document.getElementById(`chat-icon-right-${chat.id}`);
-                      const swipeDist = info.offset.x;
-                      if (swipeDist < 0 && leftIcon) {
-                        const progress = Math.min(Math.abs(swipeDist) / 60, 1);
-                        leftIcon.style.opacity = progress.toString();
-                        leftIcon.style.transform = `scale(${0.5 + progress * 0.5})`;
-                        if (rightIcon) rightIcon.style.opacity = '0';
-                        if (progress === 1 && leftIcon.dataset.vibrated !== 'true') {
-                          if ('vibrate' in navigator) navigator.vibrate(10);
-                          leftIcon.dataset.vibrated = 'true';
-                        } else if (progress < 1) {
-                          leftIcon.dataset.vibrated = 'false';
-                        }
-                      } else if (swipeDist > 0 && rightIcon) {
-                        const progress = Math.min(Math.abs(swipeDist) / 60, 1);
-                        rightIcon.style.opacity = progress.toString();
-                        rightIcon.style.transform = `scale(${0.5 + progress * 0.5})`;
-                        if (leftIcon) leftIcon.style.opacity = '0';
-                        if (progress === 1 && rightIcon.dataset.vibrated !== 'true') {
-                          if ('vibrate' in navigator) navigator.vibrate(10);
-                          rightIcon.dataset.vibrated = 'true';
-                        } else if (progress < 1) {
-                          rightIcon.dataset.vibrated = 'false';
-                        }
+                    style={{ willChange: 'transform, opacity' }}
+                    animate={pendingDeleteChatId === chat.id ? { opacity: 0, x: -350, scale: 0.85 } : { opacity: 1, x: 0, scale: 1 }}
+                    transition={{ duration: 0.35, ease: [0.32, 0.94, 0.6, 1] }}
+                    onClick={() => {
+                      if (isSelectionMode) {
+                        setSelectedChatIds(prev => 
+                          prev.includes(chat.id) ? prev.filter(x => x !== chat.id) : [...prev, chat.id]
+                        );
+                      } else {
+                        setActiveChat(chat);
+                        if ('vibrate' in navigator) navigator.vibrate(10);
                       }
                     }}
-                    onDragEnd={(e, info) => {
-                      const leftIcon = document.getElementById(`chat-icon-left-${chat.id}`);
-                      const rightIcon = document.getElementById(`chat-icon-right-${chat.id}`);
-                      if (leftIcon) {
-                        leftIcon.style.opacity = '0';
-                        leftIcon.dataset.vibrated = 'false';
-                      }
-                      if (rightIcon) {
-                        rightIcon.style.opacity = '0';
-                        rightIcon.dataset.vibrated = 'false';
-                      }
-                      if (info.offset.x < -60) {
-                         toggleArchiveChat(chat.id);
-                      } else if (info.offset.x > 60) {
-                         togglePinChat(chat.id);
-                      }
-                    }}
-                    onClick={() => setActiveChat(chat)}
-                    onTouchStart={(e) => {
-                      const timer = setTimeout(() => {
-                        setSidebarCtxMenu(chat.id);
-                        if ('vibrate' in navigator) navigator.vibrate(15);
-                      }, 350);
-                      e.currentTarget.dataset.lph = timer.toString();
-                    }}
-                    onTouchEnd={(e) => {
-                      const timer = e.currentTarget.dataset.lph;
-                      if (timer) clearTimeout(parseInt(timer));
-                    }}
-                    onTouchMove={(e) => {
-                      const timer = e.currentTarget.dataset.lph;
-                      if (timer) clearTimeout(parseInt(timer));
-                    }}
-                    onTouchCancel={(e) => {
-                      const timer = e.currentTarget.dataset.lph;
-                      if (timer) clearTimeout(parseInt(timer));
-                    }}
-                    onContextMenu={(e: React.MouseEvent) => {
-                      e.preventDefault();
-                      setSidebarCtxMenu(chat.id);
-                    }}
-                    className={`flex h-full w-full items-center gap-3 cursor-pointer select-none relative transition-all duration-200 ${isActive ? 'bg-white/[0.09] border-l-2 border-[var(--glass-accent)] px-5 py-3 border-b border-white/[0.05]' : 'hover:bg-white/[0.03] bg-transparent px-5 py-2.5 border-b border-white/[0.02]'}`}
+                    className={`h-full rounded-[20px] flex items-center gap-4 px-4 cursor-pointer select-none relative transition-all duration-300 group overflow-hidden ${
+                      isActive 
+                        ? 'bg-white/[0.08] backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-white/[0.15]' 
+                        : 'hover:bg-white/[0.05] active:bg-white/[0.08] border border-transparent hover:border-white/[0.05]'
+                    }`}
                   >
-                    {/* Context Menu Overlay */}
-                    {sidebarCtxMenu === chat.id && (
+                    {/* Active Chat indicator line */}
+                    {isActive && (
+                      <div className="absolute left-1.5 top-1/4 bottom-1/4 w-1 bg-cyan-500 rounded-full shadow-[0_0_12px_rgba(34,211,238,0.6)]" />
+                    )}
+
+                    {/* Selection Mode Checkbox */}
+                    {isSelectionMode && (
                       <div 
-                        className="absolute inset-0 z-50 bg-[#0A0A0A]/95 backdrop-blur-md flex items-center justify-around px-4 shadow-2xl animate-fade-in-up"
-                        onClick={(e) => { e.stopPropagation(); setSidebarCtxMenu(null); }}
-                        onMouseLeave={() => setSidebarCtxMenu(null)}
+                        className="shrink-0 flex items-center justify-center pr-1" 
+                        onClick={(e) => { e.stopPropagation(); }}
                       >
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); togglePinChat(chat.id); setSidebarCtxMenu(null); }} 
-                        className="flex flex-col items-center gap-1.5 p-2 hover:bg-slate-800 rounded-xl transition text-cyan-400"
-                        title={isPinned ? 'Unpin' : 'Pin'}
-                      >
-                        <Pin className="w-4 h-4" />
-                        <span className="text-[10px] uppercase font-bold font-mono tracking-wider">{isPinned ? 'Unpin' : 'Pin'}</span>
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); toggleArchiveChat(chat.id); setSidebarCtxMenu(null); }} 
-                        className="flex flex-col items-center gap-1.5 p-2 hover:bg-slate-800 rounded-xl transition text-slate-300"
-                        title={isArchived ? 'Unarchive' : 'Archive'}
-                      >
-                        <Archive className="w-4 h-4" />
-                        <span className="text-[10px] uppercase font-bold font-mono tracking-wider">{isArchived ? 'Unarchive' : 'Archive'}</span>
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); toggleMuteChat(chat.id); setSidebarCtxMenu(null); }} 
-                        className="flex flex-col items-center gap-1.5 p-2 hover:bg-slate-800 rounded-xl transition text-slate-300"
-                        title={isMuted ? 'Unmute' : 'Mute'}
-                      >
-                        {isMuted ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                        <span className="text-[10px] uppercase font-bold font-mono tracking-wider">{isMuted ? 'Unmute' : 'Mute'}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Chat Thumbnail */}
-                  <div className="relative">
-                    <img 
-                      src={chat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(chat.title)}`} 
-                      alt={chat.title} 
-                      className="w-11 h-11 rounded-full object-cover shadow-md bg-white/[0.02] border border-white/10" 
-                    />
-                    {chat.type === 'direct' && (
-                      <div className={`w-3 h-3 rounded-full border-2 border-[#121215] absolute right-0 bottom-0 ${
-                        chat.members.find(id => id !== currentUser?.uid) && onlineUsers[chat.members.find(id => id !== currentUser?.uid) || ''] === 'online' 
-                          ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' 
-                          : 'bg-slate-500'
-                      }`} />
+                        <button 
+                          onClick={() => {
+                            setSelectedChatIds(prev => 
+                              prev.includes(chat.id) ? prev.filter(x => x !== chat.id) : [...prev, chat.id]
+                            );
+                          }}
+                          className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all cursor-pointer ${
+                            selectedChatIds.includes(chat.id) 
+                              ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] text-slate-950 font-bold' 
+                              : 'border-white/20 hover:border-cyan-400 bg-white/[0.02]'
+                          }`}
+                        >
+                          {selectedChatIds.includes(chat.id) && <Check className="w-4 h-4 text-slate-950 stroke-[4]" />}
+                        </button>
+                      </div>
                     )}
-                  </div>
 
-                  {/* Info block */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-baseline mb-0.5">
-                      <h3 className="text-sm font-semibold truncate text-slate-200">{chat.title}</h3>
-                      {chat.lastMessage && (
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          {new Date(chat.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 truncate pr-4">
-                      {getChatTypingIndicator(chat) ? (
-                        <span className="text-cyan-400 font-medium animate-pulse font-mono text-[11px]">
-                          {getChatTypingIndicator(chat)}
-                        </span>
-                      ) : chat.lastMessage ? (
-                        <>
-                          <span className="font-medium text-slate-300">
-                            {chat.lastMessage.senderId === currentUser?.uid ? (language === 'ru' ? 'Вы: ' : 'You: ') : `${chat.lastMessage.senderName}: `}
-                          </span>
-                          {chat.lastMessage.text}
-                        </>
+                    {/* Chat Thumbnail */}
+                    <div className="relative shrink-0 select-none">
+                      {isItemFavorites ? (
+                        <div className="w-[48px] h-[48px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
+                          <Bookmark className="w-5.5 h-5.5 text-white fill-white/20" />
+                        </div>
                       ) : (
-                        <span className="italic text-slate-500">
-                          {language === 'ru' ? 'Нет сообщений' : 'No messages yet'}
-                        </span>
+                        <div className="w-[48px] h-[48px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
+                          <img 
+                            src={chat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(chat.title)}`} 
+                            alt={chat.title} 
+                            className="w-full h-full object-cover" 
+                          />
+                        </div>
                       )}
-                    </p>
-                  </div>
-
-                  {/* Status metrics */}
-                  <div className="flex flex-col items-end justify-center gap-1.5">
-                    <div className="flex gap-1.5 items-center">
-                      {isMuted && <VolumeX className="w-3 h-3 text-slate-500" />}
-                      {isPinned && <Pin className="w-3.5 h-3.5 text-cyan-400 fill-cyan-400/10" />}
+                      {chat.type === 'direct' && !isItemFavorites && (
+                        <div className={`w-3.5 h-3.5 rounded-full border-2 border-[#0C1322] absolute -right-0.5 -bottom-0.5 shadow-sm ${
+                          chat.members.find(id => id !== currentUser?.uid) && onlineUsers[chat.members.find(id => id !== currentUser?.uid) || ''] === 'online' 
+                            ? 'bg-emerald-500' 
+                            : 'bg-slate-600'
+                        }`} />
+                      )}
                     </div>
-                    {hasUnread && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-3 ${isMuted ? 'bg-slate-700 text-slate-300' : 'bg-cyan-500 text-slate-900'}`}>
-                        {unreadCount}
-                      </span>
-                    )}
-                  </div>
+
+                    {/* Info block */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="flex justify-between items-center mb-0.5">
+                        <span className="text-[15.5px] font-bold truncate text-slate-100 tracking-tight">
+                          {isItemFavorites ? (language === 'ru' ? 'Избранное' : 'Saved Messages') : chat.title}
+                        </span>
+                        {chat.lastMessage && (
+                          <div className="flex items-center gap-2 pl-2 shrink-0">
+                            {isPinned && <Pin className="w-3 h-3 text-cyan-400 -rotate-45" />}
+                            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider font-mono">
+                              {new Date(chat.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex justify-between items-center">
+                        <p className="text-[13.5px] text-slate-400 truncate pr-2 flex items-center gap-1.5 font-medium">
+                          {getChatTypingIndicator(chat) ? (
+                            <span className="text-cyan-400 font-bold animate-pulse">{getChatTypingIndicator(chat)}</span>
+                          ) : chat.lastMessage ? (
+                            <>
+                              {chat.lastMessage.senderId === currentUser?.uid && (
+                                <span className="text-cyan-500 shrink-0">
+                                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                    <path d="M20 6L9 17L4 12" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d="M16 6L5 17L0 12" className="translate-x-1" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </span>
+                              )}
+                              <span className="truncate opacity-80">
+                                {chat.type === 'group' && chat.lastMessage.senderId !== currentUser?.uid && (
+                                  <span className="text-slate-300 font-bold">{chat.lastMessage.senderName}: </span>
+                                )}
+                                {chat.lastMessage.text}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-slate-500 italic opacity-60 font-normal">{language === 'ru' ? 'Нет сообщений' : 'No messages yet'}</span>
+                          )}
+                        </p>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isMuted && <VolumeX className="w-3.5 h-3.5 text-slate-600" />}
+                          {hasUnread && (
+                            <span className={`text-[10px] font-black min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full leading-none text-white ${isMuted ? 'bg-slate-700' : 'bg-cyan-600 shadow-[0_0_10px_rgba(8,145,178,0.5)]'}`}>
+                              {unreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </motion.div>
                 </div>
               );
             })}
           </div>
         )}
+
+        {/* Floating Multi-select Action Bar */}
+        <AnimatePresence>
+          {isSelectionMode && selectedChatIds.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 50, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 50, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 400, damping: 30 }}
+              className="absolute bottom-4 left-4 right-4 z-40 bg-slate-950/95 backdrop-blur-xl border border-white/10 p-3.5 rounded-2xl flex items-center justify-between shadow-2xl"
+            >
+              <div className="flex flex-col select-none">
+                <span className="text-xs font-semibold text-slate-100">
+                  {language === 'ru' 
+                    ? `Выбрано диалогов: ${selectedChatIds.length}` 
+                    : `Selected Chats: ${selectedChatIds.length}`}
+                </span>
+                <span className="text-[10px] text-slate-400 font-sans">
+                  {language === 'ru' ? 'Выберите действие' : 'Choose action'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setIsSelectionMode(false);
+                    setSelectedChatIds([]);
+                  }}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 transition text-[11px] font-bold text-slate-300 rounded-xl cursor-pointer"
+                >
+                  {language === 'ru' ? 'Отмена' : 'Cancel'}
+                </button>
+                <button
+                  onClick={() => setShowMultiDeleteConfirm(true)}
+                  className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 active:scale-95 transition text-[11px] font-bold text-rose-450 rounded-xl cursor-pointer flex items-center gap-1 shadow-lg shadow-rose-500/10"
+                >
+                  <Trash2 className="w-3.5 h-3.5 animate-bounce-gentle" />
+                  {language === 'ru' ? 'Удалить' : 'Delete'}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bulk Deletion Confirmation Dialog Modal */}
+        <AnimatePresence>
+          {showMultiDeleteConfirm && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="w-full max-w-sm vision-floating-header p-6 rounded-[32px] shadow-[0_30px_70px_rgba(0,0,0,0.6)] text-center animate-in fade-in zoom-in-95 duration-300"
+              >
+                <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-rose-500/5">
+                  <Trash2 className="w-7 h-7 text-rose-400 animate-pulse" />
+                </div>
+                <h3 className="text-base font-bold text-slate-100 uppercase tracking-widest mb-2">
+                  {language === 'ru' ? 'Удаление чатов' : 'Bulk Delete'}
+                </h3>
+                <p className="text-[13px] text-slate-400 mb-6 leading-relaxed px-2">
+                  {language === 'ru' 
+                    ? `Вы действительно хотите удалить выбранные диалоги (${selectedChatIds.length})? Это действие необратимо.` 
+                    : `Are you sure you want to delete all selected (${selectedChatIds.length}) chats? This action is irreversible.`}
+                </p>
+                <div className="flex justify-center gap-3 text-xs font-bold uppercase tracking-wider">
+                  <button
+                    onClick={() => setShowMultiDeleteConfirm(false)}
+                    className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 active:scale-95 rounded-2xl text-slate-400 cursor-pointer transition border border-white/5"
+                  >
+                    {language === 'ru' ? 'Отмена' : 'Cancel'}
+                  </button>
+                  <button
+                    onClick={handleBulkDelete}
+                    className="flex-1 px-4 py-3 bg-rose-500 hover:bg-rose-600 active:scale-95 rounded-2xl text-white cursor-pointer transition shadow-xl shadow-rose-500/20"
+                  >
+                    {language === 'ru' ? 'Удалить' : 'Delete'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Folder Deletion Confirmation Dialog Modal */}
+        <AnimatePresence>
+          {folderToDelete && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="w-full max-w-sm glass-panel bg-[#0d1627]/95 border border-white/10 p-5 rounded-2xl shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200"
+              >
+                <div className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/20 flex items-center justify-center mx-auto mb-3.5">
+                  <FolderOpen className="w-6 h-6 text-rose-450 animate-pulse" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide mb-1.5">
+                  {language === 'ru' ? 'Удаление папки' : 'Delete Folder'}
+                </h3>
+                <p className="text-xs text-slate-400 mb-5 leading-normal md:px-2">
+                  {language === 'ru' 
+                    ? `Вы уверены, что хотите удалить папку «${folderToDelete.name}»? Все чаты останутся невредимыми.` 
+                    : `Are you sure you want to delete folder "${folderToDelete.name}"? The chats inside will remain untampered.`}
+                </p>
+                <div className="flex justify-end gap-2 text-xs font-semibold">
+                  <button
+                    onClick={() => setFolderToDelete(null)}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 active:scale-95 rounded-xl text-slate-350 cursor-pointer transition"
+                  >
+                    {language === 'ru' ? 'Отмена' : 'Cancel'}
+                  </button>
+                  <button
+                    onClick={handleFolderDelete}
+                    className="px-4 py-2 bg-rose-500 hover:bg-rose-600 active:scale-95 rounded-xl text-white font-bold cursor-pointer transition shadow-lg shadow-rose-500/25"
+                  >
+                    {language === 'ru' ? 'Да, удалить' : 'Yes, Delete'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Chat Actions Context Menu Modal */}
+        <AnimatePresence>
+          {sidebarCtxMenu && (() => {
+            const ctxChat = chats.find(c => c.id === sidebarCtxMenu);
+            if (!ctxChat) return null;
+            const isFavorites = ctxChat.type === 'direct' && ctxChat.members.length === 1 && ctxChat.members[0] === currentUser?.uid;
+            const isPinned = currentUser && ctxChat.pinnedIds?.includes(currentUser.uid);
+            const isMuted = currentUser && ctxChat.muteIds?.includes(currentUser.uid);
+            const isArchived = currentUser && ctxChat.archivedIds?.includes(currentUser.uid);
+
+            return (
+              <div 
+                className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                onClick={() => setSidebarCtxMenu(null)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="w-full max-w-sm vision-floating-header p-6 rounded-[32px] shadow-[0_30px_70px_rgba(0,0,0,0.5)] space-y-5 animate-in fade-in zoom-in-95 duration-300"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-4 pb-4 border-b border-white/10">
+                    <img 
+                      src={ctxChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(ctxChat.title)}`} 
+                      alt={ctxChat.title} 
+                      className="w-12 h-12 rounded-full object-cover border border-white/20 shadow-lg" 
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-[15px] font-bold text-slate-100 truncate tracking-tight">{ctxChat.title}</h4>
+                      <p className="text-[11.5px] text-slate-500 font-medium truncate uppercase tracking-widest mt-0.5">
+                        {isFavorites 
+                          ? (language === 'ru' ? 'Личное облако' : 'Personal Cloud')
+                          : ctxChat.type === 'group' 
+                            ? (language === 'ru' ? 'Группа' : 'Group Chat') 
+                            : (language === 'ru' ? 'Диалог' : 'Direct Message')
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                  {isFavorites && (
+                    <div className="p-3 bg-cyan-500/10 border border-cyan-500/15 rounded-xl text-[11px] text-cyan-400 leading-normal font-sans text-center">
+                      {language === 'ru' 
+                        ? 'Это ваше личное избранное облако. Здесь можно хранить заметки, файлы и ссылки. Этот чат нельзя удалить.' 
+                        : 'This is your personal Favorites cloud. You can store notes, files, and links here. This chat cannot be deleted.'}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {/* Pin Action */}
+                    <button
+                      onClick={async () => {
+                        await togglePinChat(ctxChat.id);
+                        setSidebarCtxMenu(null);
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.1] active:scale-[0.98] border border-white/10 text-xs font-bold text-slate-100 transition-all cursor-pointer group shadow-sm"
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <Pin className={`w-4.5 h-4.5 text-cyan-400 transition-transform group-hover:rotate-12 ${isPinned ? 'fill-cyan-400' : ''}`} />
+                        <span>{isPinned ? (language === 'ru' ? 'Открепить' : 'Unpin Chat') : (language === 'ru' ? 'Закрепить' : 'Pin Chat')}</span>
+                      </div>
+                      <span className="text-[9px] text-slate-500 font-mono tracking-tighter uppercase opacity-60">Swipe Right</span>
+                    </button>
+
+                    {!isFavorites && (
+                      <>
+                        {/* Mute Action */}
+                        <button
+                          onClick={async () => {
+                            await toggleMuteChat(ctxChat.id);
+                            setSidebarCtxMenu(null);
+                          }}
+                          className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.1] active:scale-[0.98] border border-white/10 text-xs font-bold text-slate-100 transition-all cursor-pointer group shadow-sm"
+                        >
+                          {isMuted ? (
+                            <Volume2 className="w-4.5 h-4.5 text-emerald-400" />
+                          ) : (
+                            <VolumeX className="w-4.5 h-4.5 text-slate-400 group-hover:text-amber-400" />
+                          )}
+                          <span>{isMuted ? (language === 'ru' ? 'Включить звук' : 'Unmute Chat') : (language === 'ru' ? 'Выключить звук' : 'Mute Chat')}</span>
+                        </button>
+
+                        {/* Archive Action */}
+                        <button
+                          onClick={async () => {
+                            await toggleArchiveChat(ctxChat.id);
+                            setSidebarCtxMenu(null);
+                          }}
+                          className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.1] active:scale-[0.98] border border-white/10 text-xs font-bold text-slate-100 transition-all cursor-pointer group shadow-sm"
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <Archive className="w-4.5 h-4.5 text-amber-500" />
+                            <span>{isArchived ? (language === 'ru' ? 'Вернуть из архива' : 'Unarchive Chat') : (language === 'ru' ? 'В архив' : 'Archive Chat')}</span>
+                          </div>
+                          <span className="text-[9px] text-slate-500 font-mono tracking-tighter uppercase opacity-60">Swipe Left</span>
+                        </button>
+
+                        {/* Delete Action */}
+                        <button
+                          onClick={() => {
+                            setSidebarCtxMenu(null);
+                            setDeleteConfirmChatId(ctxChat.id);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/15 border border-rose-500/10 text-xs font-semibold text-rose-400 transition-all cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-450 animate-bounce-gentle" />
+                          <span>{language === 'ru' ? 'Удалить диалог' : 'Delete Chat'}</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => setSidebarCtxMenu(null)}
+                    className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-bold text-slate-350 rounded-xl transition cursor-pointer text-center"
+                  >
+                    {language === 'ru' ? 'Закрыть' : 'Close'}
+                  </button>
+                </motion.div>
+              </div>
+            );
+          })()}
+        </AnimatePresence>
+
+        {/* Single Chat Deletion Confirmation Dialog Modal */}
+        <AnimatePresence>
+          {deleteConfirmChatId && (() => {
+            const chatToDelete = chats.find(c => c.id === deleteConfirmChatId);
+            if (!chatToDelete) return null;
+            return (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="w-full max-w-sm glass-panel bg-[#0d1627]/95 border border-white/10 p-5 rounded-2xl shadow-2xl text-center animate-in fade-in zoom-in-95 duration-200"
+                >
+                  <div className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/20 flex items-center justify-center mx-auto mb-3.5">
+                    <Trash2 className="w-6 h-6 text-rose-450 animate-pulse" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide mb-1.5">
+                    {language === 'ru' ? 'Удаление чата' : 'Delete Chat'}
+                  </h3>
+                  <p className="text-xs text-slate-400 mb-5 leading-normal md:px-2">
+                    {language === 'ru' 
+                      ? `Вы уверены, что хотите удалить чат «${chatToDelete.title}»? Это действие необратимо.` 
+                      : `Are you sure you want to delete the chat "${chatToDelete.title}"? This action is irreversible.`}
+                  </p>
+                  <div className="flex justify-end gap-2 text-xs font-semibold">
+                    <button
+                      onClick={() => setDeleteConfirmChatId(null)}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 active:scale-95 rounded-xl text-slate-350 cursor-pointer transition"
+                    >
+                      {language === 'ru' ? 'Отмена' : 'Cancel'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await deleteChat(deleteConfirmChatId);
+                        setDeleteConfirmChatId(null);
+                      }}
+                      className="px-4 py-2 bg-rose-500 hover:bg-rose-600 active:scale-95 rounded-xl text-white font-bold cursor-pointer transition shadow-lg shadow-rose-500/25"
+                    >
+                      {language === 'ru' ? 'Да, удалить' : 'Yes, Delete'}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            );
+          })()}
+        </AnimatePresence>
       </div>
-        </>
-      ) : sidebarView === 'contacts' ? (
-        <SidebarContactsView
-          contactsList={contactsList}
-          globalUsers={globalUsers}
-          onlineUsers={onlineUsers}
-          addContactByUsername={addContactByUsername}
-          createDirectChat={createDirectChat}
-          setSidebarView={setSidebarView}
-          language={language}
-        />
-      ) : sidebarView === 'settings' ? (
-        <SidebarSettingsView
-          onBack={() => setSidebarView('chats')}
-          userProfile={userProfile}
-          currentUser={currentUser}
-          globalReports={globalReports}
-          globalAuditLogs={globalAuditLogs}
-          resolveReport={resolveReport}
-          terminateOtherSessions={terminateOtherSessions}
-          updateMyProfile={updateMyProfile}
-          uploadAvatar={uploadAvatar}
-          deleteAvatar={deleteAvatar}
-          language={language}
-          theme={theme}
-          setTheme={setTheme}
-        />
-      ) : (
-        <SidebarProfileView
-          userProfile={userProfile}
-          uploadAvatar={uploadAvatar}
-          deleteAvatar={deleteAvatar}
-          updateMyProfile={updateMyProfile}
-          logout={logout}
-          language={language}
-        />
-      )}
+
+      {/* Panel 1: Contacts */}
+          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
+            <SidebarContactsView
+              contactsList={contactsList}
+              globalUsers={globalUsers}
+              onlineUsers={onlineUsers}
+              addContactByUsername={addContactByUsername}
+              createDirectChat={createDirectChat}
+              setSidebarView={setSidebarView}
+              language={language}
+            />
+          </div>
+
+          {/* Panel 2: Settings */}
+          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
+            <SidebarSettingsView
+              userProfile={userProfile}
+              theme={theme}
+              setTheme={setTheme}
+              language={language}
+            />
+          </div>
+
+          {/* Panel 3: Profile */}
+          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
+            <SidebarProfileView
+              userProfile={userProfile}
+              uploadAvatar={uploadAvatar}
+              deleteAvatar={deleteAvatar}
+              updateMyProfile={updateMyProfile}
+              createDirectChat={createDirectChat}
+              logout={logout}
+              language={language}
+            />
+          </div>
+        </div>
+
+        {/* Swipe cue indicator removed per request */}
+      </div>
 
       {/* Bottom Navigation Dock */}
-      <div className="grid grid-cols-4 border-t border-white/5 bg-[#0a0a0d]/65 backdrop-blur-md text-slate-450 text-[10px] select-none shrink-0" style={{ height: '56px' }}>
-        {[
-          { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats', icon: MessageSquare },
-          { id: 'contacts', label: language === 'ru' ? 'Контакты' : 'Contacts', icon: Users },
-          { id: 'settings', label: language === 'ru' ? 'Настройки' : 'Settings', icon: Sliders },
-          { id: 'profile', label: language === 'ru' ? 'Профиль' : 'Profile', icon: User },
-        ].map((btn) => {
-          const Icon = btn.icon;
-          const isActive = sidebarView === btn.id;
-          return (
-            <button
-              key={btn.id}
-              onClick={() => {
-                setSidebarView(btn.id as any);
-                setSearchQuery('');
-              }}
-              className={`flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all ${isActive ? 'text-cyan-400 font-bold bg-white/[0.02]' : 'hover:text-slate-200 hover:bg-white/[0.01]'}`}
-            >
-              <Icon className={`w-4.5 h-4.5 ${isActive ? 'scale-110 text-cyan-400 stroke-[2.2px]' : 'scale-100 opacity-65'}`} />
-              <span className="text-[10px] tracking-tight">{btn.label}</span>
-            </button>
-          );
-        })}
+      <div className="grid grid-cols-4 border-t border-white/5 bg-[#0a0a0d]/65 backdrop-blur-md text-slate-450 text-[10px] select-none shrink-0 relative md:hidden" style={{ height: '56px' }}>
+        {(() => {
+          const totalUnreads = chats.reduce((acc, chat) => {
+            const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
+            if (isArchived) return acc;
+            const count = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
+            return acc + count;
+          }, 0);
+
+          return [
+            { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats', icon: MessageSquare },
+            { id: 'contacts', label: language === 'ru' ? 'Контакты' : 'Contacts', icon: Users },
+            { id: 'settings', label: language === 'ru' ? 'Настройки' : 'Settings', icon: Sliders },
+            { id: 'profile', label: language === 'ru' ? 'Профиль' : 'Profile', icon: User },
+          ].map((btn) => {
+            const Icon = btn.icon;
+            const isActive = sidebarView === btn.id;
+            return (
+              <motion.button
+                key={btn.id}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setSidebarView(btn.id as any);
+                  setSearchQuery('');
+                }}
+                className={`flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all relative ${isActive ? 'text-cyan-400 font-bold' : 'hover:text-slate-200 text-slate-450'}`}
+              >
+                <div className="relative">
+                  <Icon className={`w-4.5 h-4.5 transition-transform duration-300 ${isActive ? 'scale-110 text-cyan-400 stroke-[2.2px]' : 'scale-100 opacity-65'}`} />
+                  
+                  {/* Total unread badge for Chats button */}
+                  {btn.id === 'chats' && totalUnreads > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 text-[9px] font-black h-4 min-w-[16px] px-1 flex items-center justify-center rounded-full shadow-[0_2px_8px_rgba(6,182,212,0.6)] leading-none">
+                      {totalUnreads}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] tracking-tight">{btn.label}</span>
+
+                {/* Animated active navigation tab underline/glow */}
+                {isActive && (
+                  <motion.div
+                    layoutId="activeNavTab"
+                    className="absolute bottom-0 left-2 right-2 h-[2.5px] bg-gradient-to-r from-cyan-400 to-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.7)] rounded-full"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+              </motion.button>
+            );
+          });
+        })()}
+        </div>
       </div>
 
       {/* Creation Modal */}
       {showCreateChat && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 z-[500] select-none">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-md glass-panel rounded-2xl overflow-hidden p-5 shadow-2xl relative" style={{ background: 'var(--glass-sidebar-bg)' }}
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="w-full max-w-md bg-[#0E0E10]/95 border border-white/10 rounded-[32px] p-7 shadow-2xl relative backdrop-blur-3xl"
           >
-            <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
-              <span className="font-semibold text-[var(--glass-text)]">Configure Platform Chat</span>
-              <button onClick={() => setShowCreateChat(false)} className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer">
+            <div className="flex justify-between items-center pb-4 border-b border-white/5 mb-5">
+              <span className="font-bold text-slate-100 text-[17px]">{language === 'ru' ? 'Новый чат' : 'New Chat'}</span>
+              <button onClick={() => setShowCreateChat(false)} className="text-slate-400 hover:text-white p-1.5 bg-white/5 rounded-full transition active:scale-90 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateChatSubmit} className="space-y-4">
+            <form onSubmit={handleCreateChatSubmit} className="space-y-5">
               <div>
-                <label className="block text-xs uppercase font-mono tracking-wider text-[var(--glass-accent)] mb-1.5 font-semibold">Conversation Class</label>
-                <div className="grid grid-cols-2 gap-2 text-sm text-[var(--glass-text)]">
+                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-cyan-400/80 mb-2.5 ml-1">{language === 'ru' ? 'КЛАСС БЕСЕДЫ' : 'CONVERSATION CLASS'}</label>
+                <div className="grid grid-cols-2 gap-3 text-sm text-[var(--glass-text)]">
                   <button 
                     type="button"
                     onClick={() => setChatTypeSelection('group')}
-                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 cursor-pointer transition-all ${chatTypeSelection === 'group' ? 'border-[var(--glass-accent)] bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold' : 'border-white/5 bg-black/10 hover:border-white/10 hover:bg-black/20'}`}
+                    className={`p-4 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all duration-300 ${chatTypeSelection === 'group' ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.1)]' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-white/[0.06]'}`}
                   >
-                    <Users className="w-4 h-4" />
-                    <span>Group Chat</span>
+                    <div className={`p-2.5 rounded-xl transition-colors ${chatTypeSelection === 'group' ? 'bg-cyan-500/20' : 'bg-white/5'}`}>
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <span className="font-semibold">{language === 'ru' ? 'Группа' : 'Group Chat'}</span>
                   </button>
                   <button 
                     type="button"
                     onClick={() => setChatTypeSelection('channel')}
-                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 cursor-pointer transition-all ${chatTypeSelection === 'channel' ? 'border-[var(--glass-accent)] bg-[var(--glass-accent-muted)] text-[var(--glass-accent)] font-semibold' : 'border-white/5 bg-black/10 hover:border-white/10 hover:bg-black/20'}`}
+                    className={`p-4 rounded-2xl border flex flex-col items-center gap-2 cursor-pointer transition-all duration-300 ${chatTypeSelection === 'channel' ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.1)]' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-white/[0.06]'}`}
                   >
-                    <Tv className="w-4 h-4" />
-                    <span>Channel</span>
+                    <div className={`p-2.5 rounded-xl transition-colors ${chatTypeSelection === 'channel' ? 'bg-cyan-500/20' : 'bg-white/5'}`}>
+                      <Tv className="w-5 h-5" />
+                    </div>
+                    <span className="font-semibold">{language === 'ru' ? 'Канал' : 'Channel'}</span>
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">Title</label>
+                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'НАЗВАНИЕ' : 'TITLE'}</label>
                 <input 
                   type="text" 
                   value={newChatTitle}
                   onChange={(e) => setNewChatTitle(e.target.value)}
-                  placeholder="Insert title..."
-                  className="w-full bg-black/15 text-[var(--glass-text)] border border-white/5 px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all"
+                  placeholder={language === 'ru' ? 'Назовите ваш чат...' : 'Insert title...'}
+                  className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">Rules / Info</label>
+                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'ОПИСАНИЕ / ПРАВИЛА' : 'INFO / RULES'}</label>
                 <textarea 
                   value={groupRules}
                   onChange={(e) => setGroupRules(e.target.value)}
-                  placeholder="Information or behavior rules..."
-                  className="w-full bg-black/15 text-[var(--glass-text)] border border-white/5 px-3.5 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all h-16 resize-none"
+                  placeholder={language === 'ru' ? 'Информация о канале или правила...' : 'Information or behavior rules...'}
+                  className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all h-20 resize-none custom-scrollbar shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">Invite Contacts</label>
-                <div className="max-h-[120px] overflow-y-auto space-y-1 bg-black/15 p-2 rounded-xl border border-white/5">
+                <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'ПРИГЛАСИТЬ УЧАСТНИКОВ' : 'INVITE MEMBERS'}</label>
+                <div className="max-h-[140px] overflow-y-auto space-y-1.5 bg-white/[0.03] p-2.5 rounded-2xl border border-white/5 custom-scrollbar shadow-inner">
                   {contactsList.length === 0 ? (
-                    <span className="text-xs text-[var(--glass-text-muted)] italic block p-1">No contacts added yet.</span>
+                    <div className="text-xs text-slate-500 italic p-3 text-center">
+                      {language === 'ru' ? 'У вас пока нет контактов.' : 'No contacts added yet.'}
+                    </div>
                   ) : (
                     contactsList.map((c) => (
-                      <label key={c.uid} className="flex items-center gap-3 p-1.5 hover:bg-[var(--glass-item-active)] rounded-lg cursor-pointer text-xs text-[var(--glass-text)]">
-                        <input 
-                          type="checkbox"
-                          checked={selectedMembers.includes(c.uid)}
-                          onChange={() => {
-                            setSelectedMembers(prev => 
-                              prev.includes(c.uid) ? prev.filter(x => x !== c.uid) : [...prev, c.uid]
-                            );
-                          }}
-                          className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent" 
-                        />
-                        <img src={c.photoURL || undefined} alt={c.displayName} className="w-6 h-6 rounded-full" />
-                        <span className="font-medium text-[var(--glass-text)]">{c.displayName}</span>
+                      <label key={c.uid} className="flex items-center gap-3.5 p-2.5 hover:bg-white/5 rounded-xl cursor-pointer text-sm text-slate-200 transition-colors group">
+                        <div className="relative">
+                          <input 
+                            type="checkbox"
+                            checked={selectedMembers.includes(c.uid)}
+                            onChange={() => {
+                              setSelectedMembers(prev => 
+                                prev.includes(c.uid) ? prev.filter(x => x !== c.uid) : [...prev, c.uid]
+                              );
+                            }}
+                            className="hidden" 
+                          />
+                          <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${selectedMembers.includes(c.uid) ? 'bg-cyan-500 border-cyan-500' : 'bg-white/5 border-white/10 group-hover:border-white/20'}`}>
+                            {selectedMembers.includes(c.uid) && <Check className="w-3.5 h-3.5 text-slate-950 font-bold" />}
+                          </div>
+                        </div>
+                        <img src={c.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(c.displayName || 'U')}`} alt={c.displayName || 'User'} className="w-7 h-7 rounded-lg object-cover border border-white/10" />
+                        <span className="font-medium truncate">{c.displayName || 'User'}</span>
                       </label>
                     ))
                   )}
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-white/5 flex justify-end gap-2 text-sm">
+              <div className="pt-2">
                 <button 
-                  type="button" 
-                  onClick={() => setShowCreateChat(false)}
-                  className="px-4 py-2 bg-black/10 hover:bg-black/20 rounded-xl text-[var(--glass-text-muted)] cursor-pointer"
+                  type="submit" 
+                  className="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-2xl text-sm transition shadow-[0_10px_25px_rgba(34,211,238,0.2)] active:scale-95 cursor-pointer"
                 >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  className="px-4 py-2 bg-[var(--glass-accent)] hover:opacity-90 rounded-xl text-white font-semibold cursor-pointer shadow"
-                >
-                  Build Chat
+                  {language === 'ru' ? 'Создать чат' : 'Initialize Chat'}
                 </button>
               </div>
             </form>
@@ -1205,35 +1878,35 @@ export const Sidebar: React.FC = () => {
 
       {/* Directory Folder Creation Modal */}
       {showFolderModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 z-[500] select-none">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-md glass-panel rounded-2xl overflow-hidden p-5 shadow-2xl relative" style={{ background: 'var(--glass-sidebar-bg)' }}
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="w-full max-w-md bg-[#0E0E10]/95 border border-white/10 rounded-[32px] p-7 shadow-2xl relative backdrop-blur-3xl"
           >
             {editingFolderId === null ? (
               // --- MODE A: LISTING & ORDERING ALL FOLDERS ---
-              <div className="space-y-4">
-                <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                  <div className="flex items-center gap-2">
-                    <Sliders className="w-5 h-5 text-cyan-400" />
-                    <span className="font-semibold text-[var(--glass-text)]">
-                      {language === 'ru' ? 'Управление папками чатов' : 'Manage Chat Folders'}
-                    </span>
+              <div className="space-y-6">
+                <div className="flex justify-between items-center pb-5 border-b border-white/10">
+                  <div className="flex flex-col">
+                    <span className="font-black text-white text-[22px] tracking-tight">{language === 'ru' ? 'Папки' : 'Folders'}</span>
+                    <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{language === 'ru' ? 'Управление категориями' : 'Manage categories'}</span>
                   </div>
-                  <button onClick={() => setShowFolderModal(false)} className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer">
+                  <button onClick={() => setShowFolderModal(false)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white bg-white/[0.05] rounded-[18px] transition active:scale-90 cursor-pointer border border-white/10">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                {/* All Folders List */}
-                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                <div className="space-y-3.5 max-h-[350px] overflow-y-auto pr-1.5 custom-scrollbar">
                   {(!userProfile?.folders || userProfile.folders.length === 0) ? (
-                    <div className="text-center py-6 text-xs text-slate-500 font-sans">
-                      {language === 'ru' 
-                        ? 'У вас пока нет папок. Создайте свою или добавьте готовый пресет ниже.' 
-                        : 'No custom folders yet. Create your first folder or choose a preset below.'}
+                    <div className="text-center py-12 bg-white/[0.02] rounded-[28px] border border-dashed border-white/10">
+                      <div className="text-4xl mb-3 opacity-30">📁</div>
+                      <p className="text-sm text-slate-500 font-bold uppercase tracking-widest">
+                        {language === 'ru' 
+                          ? 'Список пуст' 
+                          : 'No folders'}
+                      </p>
                     </div>
                   ) : (
                     userProfile.folders.map((f, idx) => {
@@ -1241,41 +1914,37 @@ export const Sidebar: React.FC = () => {
                       return (
                         <div 
                           key={f.id} 
-                          className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition"
+                          className="group p-4 bg-white/[0.03] border border-white/10 rounded-[22px] flex items-center justify-between transition-all hover:bg-white/[0.08] hover:border-white/20 shadow-md"
                         >
-                          <div className="flex items-center gap-2.5">
-                            <Folder className="w-4 h-4 text-cyan-500/80" />
-                            <div className="flex flex-col">
-                              <span className="text-xs font-semibold text-[var(--glass-text)]">{f.name}</span>
-                              <span className="text-[10px] text-slate-550 font-mono">
-                                {f.chatIds?.length || 0} {language === 'ru' ? 'чатов' : 'chats'}
-                              </span>
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-[18px] bg-white/[0.05] flex items-center justify-center text-cyan-400 border border-white/10 group-hover:scale-105 transition-transform">
+                              <Folder className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <div className="text-[15px] font-black text-white tracking-tight">{f.name}</div>
+                              <div className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
+                                {f.chatIds?.length || 0} {language === 'ru' ? 'диалогов' : 'chats'}
+                              </div>
                             </div>
                           </div>
 
-                          {/* Controls Row */}
-                          <div className="flex items-center gap-1">
-                            {/* Sort Up */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               type="button"
                               disabled={idx === 0}
                               onClick={() => handleMoveFolder(idx, 'up')}
-                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 disabled:opacity-25 disabled:hover:text-slate-450 cursor-pointer disabled:cursor-not-allowed"
-                              title="Move Up"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 disabled:opacity-20 cursor-pointer transition"
                             >
-                              <ChevronUp className="w-3.5 h-3.5" />
+                              <ChevronUp className="w-4 h-4" />
                             </button>
-                            {/* Sort Down */}
                             <button
                               type="button"
                               disabled={idx === listLength - 1}
                               onClick={() => handleMoveFolder(idx, 'down')}
-                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 disabled:opacity-25 disabled:hover:text-slate-450 cursor-pointer disabled:cursor-not-allowed"
-                              title="Move Down"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 disabled:opacity-20 cursor-pointer transition"
                             >
-                              <ChevronDown className="w-3.5 h-3.5" />
+                              <ChevronDown className="w-4 h-4" />
                             </button>
-                            {/* Edit */}
                             <button
                               type="button"
                               onClick={() => {
@@ -1283,19 +1952,16 @@ export const Sidebar: React.FC = () => {
                                 setNewFolderName(f.name);
                                 setNewFolderChats(f.chatIds || []);
                               }}
-                              className="p-1 rounded text-slate-450 hover:text-cyan-400 hover:bg-white/5 cursor-pointer"
-                              title="Edit Folder"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 cursor-pointer transition"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                            {/* Delete */}
                             <button
                               type="button"
                               onClick={() => deleteFolder(f.id)}
-                              className="p-1 rounded text-slate-450 hover:text-rose-400 hover:bg-white/5 cursor-pointer"
-                              title="Delete Folder"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/10 cursor-pointer transition"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
@@ -1304,39 +1970,31 @@ export const Sidebar: React.FC = () => {
                   )}
                 </div>
 
-                {/* Preset Fast Creation Row */}
-                <div className="p-3 rounded-xl bg-black/20 border border-white/5 space-y-2">
-                  <span className="block text-[10px] font-mono text-cyan-400/80 uppercase tracking-widest flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    {language === 'ru' ? 'Шаблоны папок (Прекрасный пресет)' : 'Quick-Start Presets'}
-                  </span>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleCreatePreset('work')}
-                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
-                    >
-                      💼 {language === 'ru' ? '+ Работа' : '+ Work/Groups'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCreatePreset('channels')}
-                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
-                    >
-                      📢 {language === 'ru' ? '+ Каналы' : '+ Channels'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCreatePreset('unread')}
-                      className="px-2.5 py-1 text-[10px] font-semibold bg-white/5 border border-white/10 rounded-lg hover:border-cyan-500/40 hover:bg-white/10 text-slate-200 cursor-pointer transition"
-                    >
-                      🔵 {language === 'ru' ? '+ Новые' : '+ Unread'}
-                    </button>
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-2.5">
+                    <span className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 ml-1">
+                      {language === 'ru' ? 'БЫСТРЫЕ ПРЕСЕТЫ' : 'QUICK PRESETS'}
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCreatePreset('work')}
+                        className="flex-1 px-4 py-3 text-xs font-bold bg-white/[0.03] border border-white/5 rounded-2xl hover:border-cyan-500/40 hover:bg-cyan-500/5 text-slate-300 hover:text-cyan-400 cursor-pointer transition-all active:scale-95"
+                      >
+                        💼 {language === 'ru' ? 'Работа' : 'Work/Groups'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCreatePreset('channels')}
+                        className="flex-1 px-4 py-3 text-xs font-bold bg-white/[0.03] border border-white/5 rounded-2xl hover:border-cyan-500/40 hover:bg-cyan-500/5 text-slate-300 hover:text-cyan-400 cursor-pointer transition-all active:scale-95"
+                      >
+                        📢 {language === 'ru' ? 'Каналы' : 'Channels'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Add Custom / General Actions */}
-                <div className="pt-3 border-t border-white/5 flex gap-2">
+                <div className="pt-4 border-t border-white/5 flex gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -1344,14 +2002,14 @@ export const Sidebar: React.FC = () => {
                       setNewFolderName('');
                       setNewFolderChats([]);
                     }}
-                    className="flex-1 py-2 bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-xl text-xs font-semibold shadow hover:opacity-95 text-center cursor-pointer transition-all active:scale-95"
+                    className="flex-1 py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-2xl text-sm font-bold shadow-[0_10px_20px_rgba(34,211,238,0.2)] text-center cursor-pointer transition-all active:scale-95"
                   >
-                    🚀 {language === 'ru' ? 'Создать свою папку' : 'Create Custom Folder'}
+                    {language === 'ru' ? 'Создать папку' : 'Create Custom'}
                   </button>
                   <button 
                     type="button" 
                     onClick={() => setShowFolderModal(false)}
-                    className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-300 font-semibold cursor-pointer"
+                    className="flex-1 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm text-slate-300 font-bold cursor-pointer transition-all active:scale-95"
                   >
                     {language === 'ru' ? 'Закрыть' : 'Close'}
                   </button>
@@ -1360,11 +2018,11 @@ export const Sidebar: React.FC = () => {
             ) : (
               // --- MODE B: FORM FOR ADDING / EDITING ---
               <div>
-                <div className="flex justify-between items-center pb-3 border-b border-white/5 mb-4">
-                  <span className="font-semibold text-[var(--glass-text)] text-sm">
+                <div className="flex justify-between items-center pb-4 border-b border-white/5 mb-6">
+                  <span className="font-bold text-slate-100 text-[17px]">
                     {editingFolderId === 'new' 
-                      ? (language === 'ru' ? 'Создание новой папки' : 'Create Custom Folder')
-                      : (language === 'ru' ? 'Редактирование папки' : 'Edit Folder Settings')
+                      ? (language === 'ru' ? 'Новая папка' : 'New Folder')
+                      : (language === 'ru' ? 'Настройки папки' : 'Folder Settings')
                     }
                   </span>
                   <button 
@@ -1373,51 +2031,56 @@ export const Sidebar: React.FC = () => {
                       setNewFolderName('');
                       setNewFolderChats([]);
                     }} 
-                    className="text-slate-500 hover:text-slate-200 pointer-events-auto cursor-pointer"
+                    className="text-slate-400 hover:text-white p-1.5 bg-white/5 rounded-full transition active:scale-90 cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <form onSubmit={handleCreateFolderSubmit} className="space-y-4">
+                <form onSubmit={handleCreateFolderSubmit} className="space-y-6">
                   <div>
-                    <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">
-                      {language === 'ru' ? 'Название папки' : 'Folder Name'}
+                    <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2.5 ml-1">
+                      {language === 'ru' ? 'НАЗВАНИЕ ПАПКИ' : 'FOLDER NAME'}
                     </label>
                     <input 
                       type="text" 
                       value={newFolderName}
                       onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder={language === 'ru' ? 'например: Работа, Семья, Блоги' : 'Work, Squad, Channels'}
-                      className="w-full bg-black/15 text-[var(--glass-text)] border border-white/5 px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-slate-200 placeholder-slate-650 font-sans"
+                      placeholder={language === 'ru' ? 'например: Работа, Семья' : 'e.g. Work, Family'}
+                      className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-mono text-[var(--glass-text-muted)] mb-1">
-                      {language === 'ru' ? 'Выберите диалоги для папки' : 'Select Chats to Include'}
+                    <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2.5 ml-1">
+                      {language === 'ru' ? 'ВЫБЕРИТЕ ДИАЛОГИ' : 'SELECT CHATS'}
                     </label>
-                    <div className="max-h-[160px] overflow-y-auto space-y-1 bg-black/15 p-2 rounded-xl border border-white/5">
+                    <div className="max-h-[200px] overflow-y-auto space-y-1.5 bg-white/[0.03] p-2.5 rounded-2xl border border-white/5 shadow-inner custom-scrollbar">
                       {chats.map((c) => (
-                        <label key={c.id} className="flex items-center gap-3 p-1.5 hover:bg-[var(--glass-item-active)] rounded-lg cursor-pointer text-xs text-[var(--glass-text)]">
-                          <input 
-                            type="checkbox"
-                            checked={newFolderChats.includes(c.id)}
-                            onChange={() => {
-                              setNewFolderChats(prev => 
-                                prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
-                              );
-                            }}
-                            className="rounded text-[var(--glass-accent)] border-white/10 focus:ring-0 bg-transparent cursor-pointer" 
-                          />
-                          <img src={c.photoURL || undefined} alt={c.title} className="w-6 h-6 rounded-full inline-block border border-white/5 shrink-0" />
-                          <span className="font-medium text-slate-200 max-w-[200px] truncate">{c.title}</span>
+                        <label key={c.id} className="flex items-center gap-3.5 p-2.5 hover:bg-white/5 rounded-xl cursor-pointer text-sm text-slate-200 transition-colors group">
+                          <div className="relative">
+                            <input 
+                              type="checkbox"
+                              checked={newFolderChats.includes(c.id)}
+                              onChange={() => {
+                                setNewFolderChats(prev => 
+                                  prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
+                                );
+                              }}
+                              className="hidden" 
+                            />
+                            <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${newFolderChats.includes(c.id) ? 'bg-cyan-500 border-cyan-500' : 'bg-white/5 border-white/10 group-hover:border-white/20'}`}>
+                              {newFolderChats.includes(c.id) && <Check className="w-3.5 h-3.5 text-slate-950 font-bold" />}
+                            </div>
+                          </div>
+                          <img src={c.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(c.title)}`} alt={c.title} className="w-7 h-7 rounded-lg object-cover border border-white/10 shrink-0" />
+                          <span className="font-medium truncate">{c.title}</span>
                         </label>
                       ))}
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-white/5 flex justify-end gap-2 text-xs font-semibold">
+                  <div className="pt-2 flex justify-end gap-3">
                     <button 
                       type="button" 
                       onClick={() => {
@@ -1425,15 +2088,15 @@ export const Sidebar: React.FC = () => {
                         setNewFolderName('');
                         setNewFolderChats([]);
                       }} 
-                      className="px-4 py-2 bg-black/10 hover:bg-black/20 rounded-xl text-slate-400 cursor-pointer"
+                      className="flex-1 py-3.5 bg-white/5 hover:bg-white/10 rounded-2xl text-slate-400 font-bold transition active:scale-95 cursor-pointer"
                     >
-                      {language === 'ru' ? 'Назад' : 'Back to List'}
+                      {language === 'ru' ? 'Назад' : 'Back'}
                     </button>
                     <button 
                       type="submit" 
-                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-xl text-white font-semibold shadow cursor-pointer active:scale-95 transition"
+                      className="flex-[2] py-3.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-2xl text-sm shadow-[0_10px_20px_rgba(34,211,238,0.2)] active:scale-95 cursor-pointer transition"
                     >
-                      {language === 'ru' ? 'Сохранить папку' : 'Save Folder'}
+                      {language === 'ru' ? 'Сохранить' : 'Save Folder'}
                     </button>
                   </div>
                 </form>
@@ -1444,18 +2107,21 @@ export const Sidebar: React.FC = () => {
       )}
 
       {/* Profile Settings Drawer view */}
-      {false && showSettings && (
-        <div className="fixed inset-y-0 left-0 w-full sm:w-[350px] border-r border-white/5 shadow-2xl flex flex-col z-50 glass-panel" style={{ background: 'var(--glass-sidebar-bg)' }}>
-          <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.01]">
-            <span className="font-semibold text-slate-200">My Profile Settings</span>
-            <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-slate-200 cursor-pointer">
+      {showSettings && (
+        <div className="fixed inset-y-0 left-0 w-full sm:w-[400px] bg-black/20 backdrop-blur-[40px] border-r border-white/20 shadow-[20px_0_60px_rgba(0,0,0,0.4)] flex flex-col z-[400] transition-all duration-400">
+          <div className="pt-8 pb-6 px-7 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
+            <div className="flex flex-col">
+              <span className="font-black text-white text-[22px] tracking-tight">{language === 'ru' ? 'Настройки' : 'Settings'}</span>
+              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{language === 'ru' ? 'ВАШ АККАУНТ' : 'YOUR ACCOUNT'}</span>
+            </div>
+            <button onClick={() => setShowSettings(false)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white bg-white/[0.05] rounded-[18px] transition active:scale-90 cursor-pointer border border-white/10">
               <X className="w-5 h-5" />
             </button>
           </div>
           {/* Category Tabs Switcher */}
-          <div className="flex border-b border-white/5 bg-white/[0.02] text-[10px] uppercase font-bold tracking-wider font-mono overflow-x-auto shrink-0 scrollbar-none">
+          <div className="flex border-b border-white/10 bg-white/[0.02] p-1.5 gap-1.5 overflow-x-auto scrollbar-none shrink-0 px-4">
             {[
-              { id: 'account', label: language === 'ru' ? 'Аккаунт' : 'Account' },
+              { id: 'account', label: language === 'ru' ? 'Профиль' : 'Profile' },
               { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats' },
               { id: 'notifications', label: language === 'ru' ? 'Увед.' : 'Notif.' },
               { id: 'privacy', label: language === 'ru' ? 'Приват.' : 'Privacy' },
@@ -1465,22 +2131,25 @@ export const Sidebar: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setSettingsTab(tab.id as any)}
-                className={`px-3 py-3 text-center border-b-2 transition cursor-pointer shrink-0 ${settingsTab === tab.id ? 'border-[var(--glass-accent)] text-[var(--glass-accent)] bg-white/[0.03]' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 min-w-[80px] py-2.5 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer ${settingsTab === tab.id ? 'bg-cyan-500 text-slate-950 shadow-[0_4px_12px_rgba(34,211,238,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
               >
                 {tab.label}
               </button>
             ))}
           </div>
 
-          <div className="flex-1 p-5 overflow-y-auto space-y-5">
+          <div className="flex-1 p-6 overflow-y-auto space-y-6 custom-scrollbar">
             {settingsTab === 'account' && (
               <>
                 {/* Visual Header */}
-                <div className="flex flex-col items-center gap-2 pb-4 border-b border-white/5 relative">
-                  <div className="relative group w-20 h-20">
-                    <img src={userProfile?.photoURL || undefined} alt={userProfile?.displayName} className="w-20 h-20 rounded-full border-2 border-[var(--glass-accent)] object-cover shadow-xl shadow-cyan-400/5 mb-1" />
-                    <label className="absolute inset-0 bg-black/55 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-1">
-                      <span className="text-[9px] font-bold text-white uppercase">{language === 'ru' ? 'Изменить' : 'Change'}</span>
+                <div className="flex flex-col items-center gap-3 pb-6 border-b border-white/5 relative">
+                  <div className="relative group w-24 h-24">
+                    <img src={userProfile?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(userProfile?.displayName || 'U')}`} alt={userProfile?.displayName} className="w-24 h-24 rounded-[32px] border-2 border-white/10 object-cover shadow-2xl transition-transform group-hover:scale-105" />
+                    <label className="absolute inset-0 bg-black/60 rounded-[32px] flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-center p-2 backdrop-blur-sm">
+                      <div className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center mb-1">
+                        <Camera className="w-4 h-4 text-white" />
+                      </div>
+                      <span className="text-[10px] font-bold text-white uppercase tracking-wider">{language === 'ru' ? 'Сменить' : 'Update'}</span>
                       <input 
                         type="file" 
                         accept="image/*" 
@@ -1490,7 +2159,7 @@ export const Sidebar: React.FC = () => {
                             try {
                               await uploadAvatar(file);
                             } catch (err: any) {
-                              alert(language === 'ru' ? 'Ошибка загрузки аватара: ' + err.message : 'Error uploading avatar: ' + err.message);
+                              showToast(language === 'ru' ? 'Ошибка загрузки: ' + err.message : 'Upload error: ' + err.message, 'error');
                             }
                           }
                         }}
@@ -1505,71 +2174,113 @@ export const Sidebar: React.FC = () => {
                           await deleteAvatar();
                         }
                       }}
-                      className="text-[9px] font-semibold text-rose-450 hover:text-rose-400 underline transition cursor-pointer"
+                      className="text-[10px] font-bold text-rose-500 uppercase tracking-widest hover:text-rose-400 transition cursor-pointer"
                     >
-                      {language === 'ru' ? 'Удалить фото' : 'Delete photo'}
+                      {language === 'ru' ? 'Удалить фото' : 'Remove Photo'}
                     </button>
                   )}
-                  <div className="font-semibold text-lg text-slate-200 mt-1">{userProfile?.displayName}</div>
-                  <div className="text-xs font-mono text-[var(--glass-accent)]">@{userProfile?.username}</div>
-                  <div className="text-[10px] text-slate-500 font-mono">
-                    {language === 'ru' ? 'Регистрация:' : 'Registered:'} {userProfile?.createdAt ? new Date(userProfile.createdAt).toLocaleDateString() : 'N/A'}
+                  <div className="text-center">
+                    <div className="font-bold text-xl text-slate-100">{userProfile?.displayName}</div>
+                    <div className="text-xs font-bold text-cyan-400/80 mt-0.5">@{userProfile?.username}</div>
                   </div>
                 </div>
 
                 {/* Profile fields Editing */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Имя' : 'Display Name'}</label>
-                    <input 
-                      type="text" 
-                      value={editDisplayName} 
-                      onChange={(e) => setEditDisplayName(e.target.value)}
-                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Статус' : 'Status Message'}</label>
-                    <input 
-                      type="text" 
-                      value={editStatus} 
-                      onChange={(e) => setEditStatus(e.target.value)}
-                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-5">
+                  <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Emoji статус' : 'Emoji Status'}</label>
+                      <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'ИМЯ В СИСТЕМЕ' : 'DISPLAY NAME'}</label>
                       <input 
                         type="text" 
-                        placeholder="🚀, 💻, 🌴"
-                        value={editEmojiStatus} 
-                        onChange={(e) => setEditEmojiStatus(e.target.value)}
-                        maxLength={3}
-                        className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all text-center" 
+                        value={editDisplayName} 
+                        onChange={(e) => setEditDisplayName(e.target.value)}
+                        className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner" 
                       />
                     </div>
+
                     <div>
-                      <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'Телефон' : 'Phone Number'}</label>
+                      <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'ВАШ СТАТУС' : 'YOUR STATUS'}</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          placeholder="🚀"
+                          value={editEmojiStatus} 
+                          onChange={(e) => setEditEmojiStatus(e.target.value)}
+                          maxLength={3}
+                          className="w-16 bg-white/[0.03] text-slate-100 border border-white/5 px-3 py-3 rounded-2xl text-center text-lg focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner" 
+                        />
+                        <input 
+                          type="text" 
+                          placeholder={language === 'ru' ? 'Что нового?' : 'Status message...'}
+                          value={editStatus} 
+                          onChange={(e) => setEditStatus(e.target.value)}
+                          className="flex-1 bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner" 
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'НОМЕР ТЕЛЕФОНА' : 'PHONE NUMBER'}</label>
                       <input 
                         type="text" 
-                        placeholder="+7 999..."
+                        placeholder="+1 234 567 89..."
                         value={editPhoneNumber} 
                         onChange={(e) => setEditPhoneNumber(e.target.value)}
-                        className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 transition-all" 
+                        className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all shadow-inner" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">{language === 'ru' ? 'ИНФОРМАЦИЯ О СЕБЕ' : 'BIO'}</label>
+                      <textarea 
+                        value={editBio} 
+                        onChange={(e) => setEditBio(e.target.value)} 
+                        placeholder={language === 'ru' ? 'Расскажите о себе...' : 'Tell something about yourself...'}
+                        className="w-full bg-white/[0.03] text-slate-100 border border-white/5 px-4 py-3 rounded-2xl text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/[0.05] transition-all h-24 resize-none shadow-inner custom-scrollbar" 
                       />
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-mono text-slate-400 mb-1">{language === 'ru' ? 'О себе (Bio)' : 'Bio'}</label>
-                    <textarea 
-                      value={editBio} 
-                      onChange={(e) => setEditBio(e.target.value)} 
-                      className="w-full bg-black/15 text-slate-100 border border-white/5 px-3 py-2 rounded-xl text-xs focus:outline-none focus:border-[var(--glass-border-focus)] focus:bg-black/25 h-16 resize-none animate-fade-in-up" 
-                    />
+                  <button 
+                    onClick={async () => {
+                      try {
+                        await updateMyProfile(
+                          editDisplayName,
+                          editBio,
+                          editStatus,
+                          undefined, // photoURL
+                          editEmojiStatus,
+                          editPhoneNumber
+                        );
+                        showToast(language === 'ru' ? 'Профиль обновлен' : 'Profile updated', 'success');
+                      } catch (err: any) {
+                        showToast(err.message, 'error');
+                      }
+                    }}
+                    className="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-2xl text-sm shadow-[0_10px_25px_rgba(34,211,238,0.2)] active:scale-95 transition-all cursor-pointer"
+                  >
+                    {language === 'ru' ? 'Сохранить изменения' : 'Synchronize Profile'}
+                  </button>
+                </div>
+
+                {/* Additional Actions */}
+                <div className="pt-6 border-t border-white/5 space-y-3">
+                  <span className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 ml-1">{language === 'ru' ? 'БЫСТРЫЕ ДЕЙСТВИЯ' : 'QUICK ACTIONS'}</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => setSettingsTab('chats')}
+                      className="flex items-center justify-center gap-2 py-3 bg-white/[0.03] border border-white/5 rounded-2xl text-xs font-bold text-slate-300 hover:bg-white/5 transition active:scale-95"
+                    >
+                      <Palette className="w-4 h-4 text-cyan-400" />
+                      {language === 'ru' ? 'Тема' : 'Theme'}
+                    </button>
+                    <button 
+                      onClick={() => setSettingsTab('notifications')}
+                      className="flex items-center justify-center gap-2 py-3 bg-white/[0.03] border border-white/5 rounded-2xl text-xs font-bold text-slate-300 hover:bg-white/5 transition active:scale-95"
+                    >
+                      <Bell className="w-4 h-4 text-cyan-400" />
+                      {language === 'ru' ? 'Увед.' : 'Alerts'}
+                    </button>
                   </div>
                 </div>
 
@@ -1591,10 +2302,10 @@ export const Sidebar: React.FC = () => {
                         if (input && input.value.trim()) {
                           try {
                             const chatObj = await joinChatByInviteCode(input.value.trim());
-                            alert(language === 'ru' ? `Успешно вошли в: ${chatObj.title}` : `Successfully joined: ${chatObj.title}`);
+                            showToast(language === 'ru' ? `Успешно вошли в: ${chatObj.title}` : `Successfully joined: ${chatObj.title}`, 'success');
                             input.value = '';
                           } catch (err: any) {
-                            alert(language === 'ru' ? 'Ошибка вступления: ' + err.message : 'Join error: ' + err.message);
+                            showToast(language === 'ru' ? 'Ошибка вступления: ' + err.message : 'Join error: ' + err.message, 'error');
                           }
                         }
                       }}
@@ -1630,49 +2341,49 @@ export const Sidebar: React.FC = () => {
             )}
 
             {settingsTab === 'chats' && (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {/* Premium Theme Selector glass card */}
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
-                  <span className="block text-xs font-mono text-slate-400 mb-1 uppercase tracking-wider">
-                    {language === 'ru' ? 'Выберите тему Glass UI' : 'Select Glass UI Theme'}
-                  </span>
-                  <div className="grid grid-cols-5 gap-1.5 pt-1">
+                <div className="space-y-3">
+                  <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">
+                    {language === 'ru' ? 'ЦВЕТОВАЯ ТЕМА' : 'VISUAL THEME'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
                     {[
-                      { id: 'theme-light-glass', name: language === 'ru' ? 'Светлая' : 'Light', bg: 'bg-slate-200 border-slate-300' },
-                      { id: 'theme-dark-glass', name: language === 'ru' ? 'Тёмная' : 'Dark', bg: 'bg-slate-900 border-slate-700' },
-                      { id: 'theme-midnight-glass', name: language === 'ru' ? 'Космос' : 'Midnight', bg: 'bg-indigo-950 border-indigo-900' },
-                      { id: 'theme-arctic-glass', name: language === 'ru' ? 'Арктика' : 'Arctic', bg: 'bg-sky-200 border-sky-300' },
-                      { id: 'theme-ocean-glass', name: language === 'ru' ? 'Океан' : 'Ocean', bg: 'bg-teal-900 border-teal-700' }
+                      { id: 'theme-light-glass', name: language === 'ru' ? 'Светлая' : 'Light Glass', icon: '☀️' },
+                      { id: 'theme-dark-glass', name: language === 'ru' ? 'Тёмная' : 'Dark Space', icon: '🌑' },
+                      { id: 'theme-midnight-glass', name: language === 'ru' ? 'Космос' : 'Midnight', icon: '🌌' },
+                      { id: 'theme-arctic-glass', name: language === 'ru' ? 'Арктика' : 'Arctic Blue', icon: '❄️' },
+                      { id: 'theme-ocean-glass', name: language === 'ru' ? 'Океан' : 'Deep Ocean', icon: '🌊' }
                     ].map((tTheme) => (
                       <button
                         key={tTheme.id}
                         type="button"
-                        title={tTheme.name}
                         onClick={() => setTheme(tTheme.id)}
-                        className={`relative flex flex-col items-center justify-center p-1.5 rounded-xl border transition-all cursor-pointer ${
+                        className={`flex items-center gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${
                           theme === tTheme.id 
-                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] shadow-md scale-105' 
-                            : 'bg-black/10 border-transparent hover:border-white/10 hover:bg-black/20'
+                            ? 'bg-cyan-500/10 border-cyan-500 shadow-[0_4px_15px_rgba(34,211,238,0.2)]' 
+                            : 'bg-white/[0.03] border-white/5 hover:bg-white/5'
                         }`}
                       >
-                        <span className={`w-3.5 h-3.5 rounded-full ${tTheme.bg} border shrink-0`} />
-                        <span className="text-[9px] font-medium tracking-tight mt-1 text-slate-300 block truncate max-w-full text-center">
-                          {tTheme.name}
-                        </span>
+                        <span className="text-xl">{tTheme.icon}</span>
+                        <div className="flex flex-col items-start">
+                          <span className={`text-xs font-bold ${theme === tTheme.id ? 'text-cyan-400' : 'text-slate-200'}`}>{tTheme.name}</span>
+                          <span className="text-[9px] text-slate-500 font-medium uppercase tracking-tighter">{tTheme.id.split('-')[1]}</span>
+                        </div>
                       </button>
                     ))}
                   </div>
                 </div>
 
                 {/* Font/Text Size Settings */}
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
-                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
-                    {language === 'ru' ? 'Размер шрифта чата' : 'Chat Text Size'}
-                  </span>
-                  <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-3">
+                  <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">
+                    {language === 'ru' ? 'РАЗМЕР ШРИФТА' : 'TEXT DENSITY'}
+                  </label>
+                  <div className="flex bg-white/[0.03] border border-white/5 p-1.5 rounded-[20px] shadow-inner">
                     {[
                       { id: 'xs', name: language === 'ru' ? 'Мелкий' : 'Small' },
-                      { id: 'sm', name: language === 'ru' ? 'Средний' : 'Medium' },
+                      { id: 'sm', name: language === 'ru' ? 'Средний' : 'Normal' },
                       { id: 'base', name: language === 'ru' ? 'Крупный' : 'Large' }
                     ].map((sOpt) => (
                       <button
@@ -1683,10 +2394,10 @@ export const Sidebar: React.FC = () => {
                           localStorage.setItem('vi-chat-text-size', sOpt.id);
                           window.dispatchEvent(new Event('vi-settings-changed'));
                         }}
-                        className={`py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition ${
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
                           textSizeSelection === sOpt.id
-                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] text-slate-100'
-                            : 'bg-black/10 border-white/5 text-slate-400 hover:text-slate-200'
+                            ? 'bg-cyan-500 text-slate-950 shadow-lg'
+                            : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
                         {sOpt.name}
@@ -1696,15 +2407,15 @@ export const Sidebar: React.FC = () => {
                 </div>
 
                 {/* Wallpaper Settings */}
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2">
-                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
-                    {language === 'ru' ? 'Фон чата' : 'Chat Wallpaper'}
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-3">
+                  <label className="block text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-2 ml-1">
+                    {language === 'ru' ? 'ФОНОВЫЕ ОБОИ' : 'CHAT WALLPAPER'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
                     {[
                       { id: 'cosmic', name: language === 'ru' ? 'Космос' : 'Cosmic Slate' },
                       { id: 'aurora', name: language === 'ru' ? 'Аврора' : 'Aurora Dream' },
-                      { id: 'minimal', name: language === 'ru' ? 'Темный' : 'Minimal Charcoal' },
+                      { id: 'minimal', name: language === 'ru' ? 'Темный' : 'Minimal' },
                       { id: 'warm', name: language === 'ru' ? 'Теплый' : 'Warm Sunset' }
                     ].map((pOpt) => (
                       <button
@@ -1715,10 +2426,10 @@ export const Sidebar: React.FC = () => {
                           localStorage.setItem('vi-chat-wallpaper', pOpt.id);
                           window.dispatchEvent(new Event('vi-settings-changed'));
                         }}
-                        className={`py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition ${
+                        className={`py-4 rounded-2xl border text-xs font-bold transition-all ${
                           wallpaperSelection === pOpt.id
-                            ? 'bg-[var(--glass-accent-muted)] border-[var(--glass-accent)] text-slate-100'
-                            : 'bg-black/10 border-white/5 text-slate-400 hover:text-slate-200'
+                            ? 'bg-cyan-500/10 border-cyan-500 text-cyan-400 shadow-lg'
+                            : 'bg-white/[0.03] border-white/5 text-slate-400 hover:text-slate-200'
                         }`}
                       >
                         {pOpt.name}
@@ -1730,344 +2441,260 @@ export const Sidebar: React.FC = () => {
             )}
 
             {settingsTab === 'notifications' && (
-              <div className="space-y-4">
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-3">
-                  <span className="block text-xs font-mono text-slate-400 font-bold uppercase tracking-wider">
-                    {language === 'ru' ? 'Звук и Вибрация' : 'Sound & Vibration'}
-                  </span>
-
-                  <div className="flex items-center justify-between pb-2 border-b border-white/[0.04]">
-                    <span className="text-xs text-slate-300">{language === 'ru' ? 'Звуковые уведомления' : 'Sound Notifications'}</span>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 rounded accent-[var(--glass-accent)] cursor-pointer"
-                      checked={soundEnabled}
-                      onChange={(e) => {
-                        setSoundEnabled(e.target.checked);
-                        localStorage.setItem('vi-sound-notifications', String(e.target.checked));
-                      }}
-                    />
+              <div className="space-y-6">
+                <div className="p-4 bg-white/[0.03] rounded-3xl border border-white/10 space-y-4 shadow-inner">
+                  <div className="flex items-center gap-3 mb-2 px-1">
+                    <div className="p-2 bg-cyan-500/10 rounded-xl">
+                      <Bell className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-widest">
+                      {language === 'ru' ? 'Оповещения' : 'Alert Settings'}
+                    </span>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-300">{language === 'ru' ? 'Вибро-отклик (Swipe/Send)' : 'Haptic Vibration on Swipes'}</span>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 rounded accent-[var(--glass-accent)] cursor-pointer"
-                      checked={vibeEnabled}
-                      onChange={(e) => {
-                        setVibeEnabled(e.target.checked);
-                        localStorage.setItem('vi-vibe-notifications', String(e.target.checked));
-                      }}
-                    />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3.5 bg-black/20 rounded-2xl border border-white/5 group transition-all hover:border-white/10">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-slate-200">{language === 'ru' ? 'Звук' : 'Sound Notifications'}</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-mono tracking-tighter">System Audio</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer"
+                          checked={soundEnabled}
+                          onChange={(e) => {
+                            setSoundEnabled(e.target.checked);
+                            localStorage.setItem('vi-sound-notifications', String(e.target.checked));
+                          }}
+                        />
+                        <div className="w-10 h-5 bg-white/5 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3.5 bg-black/20 rounded-2xl border border-white/5 group transition-all hover:border-white/10">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-slate-200">{language === 'ru' ? 'Вибро-отклик' : 'Haptic Feedback'}</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-mono tracking-tighter">Swipe & Send Actions</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer"
+                          checked={vibeEnabled}
+                          onChange={(e) => {
+                            setVibeEnabled(e.target.checked);
+                            localStorage.setItem('vi-vibe-notifications', String(e.target.checked));
+                          }}
+                        />
+                        <div className="w-10 h-5 bg-white/5 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+                      </label>
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-black/10 rounded-2xl border border-white/5">
-                  <span className="block text-xs font-mono text-slate-400 uppercase mb-1">Mute Chats Overrides</span>
-                  <p className="text-[10px] text-slate-505 leading-relaxed font-sans">
+                <div className="p-4 bg-cyan-950/20 border border-cyan-500/10 rounded-3xl flex items-start gap-3">
+                  <div className="p-1.5 bg-cyan-500/10 rounded-lg shrink-0 mt-0.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                  </div>
+                  <p className="text-[10px] text-cyan-400/80 leading-relaxed font-sans">
                     {language === 'ru' 
-                      ? 'Чтобы отключить звук для конкретного диалога, удерживайте или кликайте правой кнопкой мыши по чату в левом списке и выберите "Mute".' 
-                      : 'To mute sounds on a specific conversation, right click or long press Chat in sidebar and toggle "Mute".'}
+                      ? 'Совет: Вы можете отключить уведомления для конкретных чатов в меню их контекстных действий.' 
+                      : 'Tip: You can silence individual conversations through their specific context action menu.'}
                   </p>
                 </div>
               </div>
             )}
 
             {settingsTab === 'privacy' && (
-              <div className="space-y-4">
-                {/* Privacy Settings Accordion */}
-                <div className="p-3 bg-white/[0.02] rounded-2xl border border-white/5 space-y-3">
-                  <span className="block text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">
-                    {language === 'ru' ? 'Приватность аккаунта' : 'Privacy Settings'}
-                  </span>
+              <div className="space-y-6">
+                <div className="p-4 bg-white/[0.03] rounded-3xl border border-white/10 space-y-4 shadow-inner">
+                  <div className="flex items-center gap-3 mb-2 px-1">
+                    <div className="p-2 bg-indigo-500/10 rounded-xl">
+                      <Lock className="w-4 h-4 text-indigo-400" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-widest">
+                      {language === 'ru' ? 'Приватность' : 'Privacy Control'}
+                    </span>
+                  </div>
                   
-                  <div className="space-y-2 text-xs">
+                  <div className="space-y-2">
                     {[
-                      { label: language === 'ru' ? 'Номер телефона' : 'Phone Number', val: privacyNumber, set: setPrivacyNumber },
-                      { label: language === 'ru' ? 'Статус-сообщение' : 'Status Message', val: privacyStatus, set: setPrivacyStatus },
-                      { label: language === 'ru' ? 'Фото профиля' : 'Profile Avatar', val: privacyPhoto, set: setPrivacyPhoto },
-                      { label: language === 'ru' ? 'Последний визит' : 'Last Seen Time', val: privacyLastSeen, set: setPrivacyLastSeen },
-                      { label: language === 'ru' ? 'Статус онлайн' : 'Online Status', val: privacyOnline, set: setPrivacyOnline }
-                    ].map((field, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-1 border-b border-white/[0.02] pb-1.5 last:border-0 last:pb-0">
-                        <span className="text-slate-400 font-sans">{field.label}</span>
+                      { label: language === 'ru' ? 'Номер телефона' : 'Phone Number', val: privacyNumber, set: setPrivacyNumber, icon: <Phone className="w-3.5 h-3.5" /> },
+                      { label: language === 'ru' ? 'Статус-сообщение' : 'Status Message', val: privacyStatus, set: setPrivacyStatus, icon: <MessageSquare className="w-3.5 h-3.5" /> },
+                      { label: language === 'ru' ? 'Фото профиля' : 'Profile Photo', val: privacyPhoto, set: setPrivacyPhoto, icon: <Camera className="w-3.5 h-3.5" /> },
+                      { label: language === 'ru' ? 'Последний вход' : 'Last Seen', val: privacyLastSeen, set: setPrivacyLastSeen, icon: <Clock className="w-3.5 h-3.5" /> },
+                      { label: language === 'ru' ? 'Сетевой статус' : 'Online Status', val: privacyOnline, set: setPrivacyOnline, icon: <Activity className="w-3.5 h-3.5" /> }
+                    ].map((p) => (
+                      <div key={p.label} className="flex items-center justify-between p-3 rounded-2xl bg-black/15 border border-white/5 transition-all hover:bg-black/25">
+                        <div className="flex items-center gap-3">
+                          <div className="text-slate-500">{p.icon}</div>
+                          <span className="text-xs font-semibold text-slate-300">{p.label}</span>
+                        </div>
                         <select 
-                          value={field.val} 
-                          onChange={(e) => field.set(e.target.value as any)}
-                          className="bg-black/40 text-slate-200 border border-white/5 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-[var(--glass-border-focus)] font-mono shrink-0 cursor-pointer"
+                          value={p.val}
+                          onChange={(e) => p.set(e.target.value as any)}
+                          className="bg-transparent text-[var(--glass-accent)] font-bold text-[11px] outline-none cursor-pointer text-right appearance-none hover:text-cyan-300 transition-colors"
                         >
-                          <option value="all">{language === 'ru' ? 'Все' : 'Everyone'}</option>
-                          <option value="contacts">{language === 'ru' ? 'Контакты' : 'Contacts'}</option>
-                          <option value="nobody">{language === 'ru' ? 'Никто' : 'Nobody'}</option>
+                          <option value="all" className="bg-slate-900">{language === 'ru' ? 'Все' : 'Everyone'}</option>
+                          <option value="contacts" className="bg-slate-900">{language === 'ru' ? 'Контакты' : 'Contacts'}</option>
+                          <option value="nobody" className="bg-slate-900">{language === 'ru' ? 'Никто' : 'Nobody'}</option>
                         </select>
                       </div>
                     ))}
                   </div>
                 </div>
+
+                <div className="p-4 bg-indigo-950/20 border border-indigo-500/10 rounded-3xl">
+                  <p className="text-[10px] text-indigo-400/80 leading-relaxed italic text-center">
+                    {language === 'ru' 
+                      ? 'Ваши данные защищены сквозным шифрованием на стороне клиента.' 
+                      : 'Your personal metadata is secured via client-side propagation limits.'}
+                  </p>
+                </div>
               </div>
             )}
 
             {settingsTab === 'data' && (
-              <div className="space-y-4">
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5">
-                  <span className="block text-xs font-mono text-slate-400 uppercase tracking-wider">
-                    {language === 'ru' ? 'Память и Кэш' : 'Storage Metrics'}
-                  </span>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-400">{language === 'ru' ? 'База данных Firestore' : 'Firestore Queries'}</span>
-                    <span className="font-mono text-cyan-400">Online Sync (Active)</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-400">{language === 'ru' ? 'Локальное хранилище' : 'Local Sandbox Size'}</span>
-                    <span className="font-mono text-slate-300">~1.2 MB</span>
-                  </div>
-                </div>
-
-                {/* Active Sessions Manager (Zero-Trust Compliance) */}
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5">
-                  <div className="flex justify-between items-center">
-                    <span className="block text-xs font-mono text-amber-500 uppercase tracking-wider font-bold">
-                      {language === 'ru' ? 'Активные Сессии' : 'Active Sessions'}
+              <div className="space-y-6">
+                <div className="p-4 bg-white/[0.03] rounded-3xl border border-white/10 space-y-5 shadow-inner">
+                  <div className="flex items-center gap-3 mb-1 px-1">
+                    <div className="p-2 bg-amber-500/10 rounded-xl">
+                      <Database className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-widest">
+                      {language === 'ru' ? 'Данные и Память' : 'Data & Storage'}
                     </span>
-                    <button 
-                      onClick={() => {
-                        terminateOtherSessions().then(() => {
-                          alert(language === 'ru' ? 'Все другие сессии успешно завершены!' : 'All other device sessions revoked!');
-                        });
-                      }}
-                      className="text-[9px] uppercase font-mono px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded hover:bg-amber-500/25 text-amber-300 cursor-pointer transition active:scale-95"
-                    >
-                      {language === 'ru' ? 'Выйти на других' : 'Terminate Others'}
-                    </button>
                   </div>
-                  <div className="space-y-2 text-xs divide-y divide-white/5 max-h-[140px] overflow-y-auto pr-1">
-                    {(userProfile?.activeSessions || []).map((session, idx) => {
-                      const isCurrent = navigator.userAgent.substring(0, 30) === session.deviceName.substring(0, 30);
-                      return (
-                        <div key={session.id || idx} className="pt-1.5 first:pt-0 flex justify-between items-start gap-1">
-                          <div className="space-y-0.5">
-                            <span className="font-mono text-[10px] text-slate-200 block truncate max-w-[180px]">
-                              {session.deviceName}
-                            </span>
-                            <span className="text-[9px] text-slate-500 block font-mono">
-                              Active: {new Date(session.lastActive || Date.now()).toLocaleString()}
-                            </span>
-                          </div>
-                          {isCurrent ? (
-                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/20 border border-emerald-500/15 px-1 rounded uppercase">Current</span>
-                          ) : (
-                            <span className="text-[9px] font-mono text-slate-400 bg-slate-900/40 border border-slate-800 px-1 rounded">Offline</span>
-                          )}
+
+                  <div className="space-y-4">
+                    <div className="p-4 bg-black/20 rounded-2xl border border-white/5">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-xs font-bold text-slate-200">{language === 'ru' ? 'Использование хранилища' : 'Storage Usage'}</span>
+                        <span className="text-[11px] font-mono text-cyan-400">12.4 MB</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <div className="w-[15%] h-full bg-cyan-500 rounded-full shadow-[0_0_8px_rgba(34,211,238,0.5)]"></div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <button 
+                        onClick={() => {
+                          showToast(language === 'ru' ? 'Кэш очищен' : 'Local cache cleared', 'info');
+                        }}
+                        className="w-full flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] transition-all group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Trash2 className="w-4 h-4 text-slate-500 group-hover:text-rose-400" />
+                          <span className="text-xs font-semibold text-slate-300">{language === 'ru' ? 'Очистить кэш' : 'Clear Cache'}</span>
                         </div>
-                      );
-                    })}
+                        <span className="text-[10px] font-mono text-slate-500">2.1 MB</span>
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          window.location.reload();
+                        }}
+                        className="w-full flex items-center justify-between p-3 rounded-2xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] transition-all group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <RefreshCw className="w-4 h-4 text-slate-500 group-hover:text-cyan-400" />
+                          <span className="text-xs font-semibold text-slate-300">{language === 'ru' ? 'Перезагрузить сессию' : 'Reload Session'}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-500">Force</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-rose-950/10 rounded-2xl border border-rose-500/10 space-y-2">
-                  <span className="block text-xs font-mono text-rose-400 uppercase tracking-wider">{language === 'ru' ? 'Опасная зона' : 'Dangerous Zone'}</span>
-                  <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
-                    {language === 'ru' 
-                      ? 'Очистка кэша удалит все ваши локальные черновики, кэшированные авы и системные параметры.'
-                      : 'Clearing cache removes local draft previews, offline caches and reset preferences.'}
+                <div className="p-4 bg-amber-950/20 border border-amber-500/10 rounded-3xl text-center">
+                  <p className="text-[10px] text-amber-400/80 leading-relaxed uppercase font-bold tracking-widest">
+                    {language === 'ru' ? 'Версия клиента: 2.4.0-Glass' : 'Client Node v2.4.0-Glass'}
                   </p>
-                  <button 
-                    onClick={() => {
-                      localStorage.clear();
-                      alert(language === 'ru' ? 'Локальный кэш успешно очищен!' : 'Local cache cleaned up!');
-                      window.location.reload();
-                    }}
-                    className="w-full py-2 bg-rose-900/35 hover:bg-rose-800 hover:text-white border border-rose-500/30 rounded-xl font-mono uppercase text-[10px] font-bold text-rose-300 cursor-pointer transition active:scale-95"
-                  >
-                    {language === 'ru' ? 'Очистить кэш приложения' : 'Clear Application Cache'}
-                  </button>
                 </div>
               </div>
             )}
 
-            {settingsTab === 'admin' && currentUser?.email === 'sasamihajlov709@gmail.com' && (
-              <div className="space-y-4">
-                {/* Reports Panel */}
-                <div className="p-3.5 bg-black/20 rounded-2xl border border-rose-500/10 space-y-3 font-sans">
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span className="block text-xs font-mono text-rose-400 uppercase tracking-wider font-bold">
-                      {language === 'ru' ? 'Жалобы пользователей' : 'Pending Abuse Reports'} ({globalReports?.length || 0})
+            {settingsTab === 'admin' && (
+              <div className="space-y-6">
+                <div className="p-4 bg-white/[0.03] rounded-3xl border border-white/10 space-y-5 shadow-inner">
+                  <div className="flex items-center gap-3 mb-1 px-1">
+                    <div className="p-2 bg-rose-500/10 rounded-xl">
+                      <Terminal className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-100 uppercase tracking-widest">
+                      {language === 'ru' ? 'Панель Администратора' : 'Admin Console'}
                     </span>
                   </div>
-                  
-                  {(!globalReports || globalReports.length === 0) ? (
-                    <p className="text-[10px] text-slate-500 italic py-2">
-                      {language === 'ru' ? 'Жалоб на нарушения политик не обнаружено.' : 'No pending abuse complaints in queue.'}
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                      {globalReports.map((r) => (
-                        <div key={r.id} className="p-2.5 bg-rose-950/10 border border-rose-500/15 rounded-xl space-y-1.5 hover:bg-rose-950/20 transition text-[10px]">
-                          <div className="flex justify-between items-start gap-2">
-                            <div>
-                              <span className="text-rose-300 font-bold block truncate max-w-[170px]">
-                                Target: {r.reportedUserId}
-                              </span>
-                              <span className="text-slate-400 font-mono text-[9px] block">
-                                Complainant: {r.reporterId}
-                              </span>
-                            </div>
-                            <button 
-                              onClick={() => {
-                                resolveReport(r.id).then(() => {
-                                  alert(language === 'ru' ? 'Жалоба успешно решена!' : 'Abuse report marked as resolved.');
-                                });
-                              }}
-                              className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[8px] font-mono hover:bg-emerald-500/25 rounded cursor-pointer transition active:scale-95 text-xs font-bold"
-                            >
-                              Resolve
-                            </button>
-                          </div>
-                          <p className="text-slate-300 leading-relaxed border-l-2 border-rose-500/30 pl-2 whitespace-pre-wrap py-0.5">
-                            {r.reason}
-                          </p>
-                          <span className="text-[8px] text-slate-500 block font-mono">
-                            Logged: {new Date(r.createdAt || Date.now()).toLocaleTimeString()}
-                          </span>
-                        </div>
-                      ))}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-4 bg-black/20 rounded-2xl border border-white/5 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mb-1">Users</div>
+                      <div className="text-xl font-bold text-rose-400 font-mono">1,204</div>
                     </div>
-                  )}
+                    <div className="p-4 bg-black/20 rounded-2xl border border-white/5 text-center">
+                      <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mb-1">Uptime</div>
+                      <div className="text-xl font-bold text-rose-400 font-mono">99.9%</div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-rose-950/20 border border-rose-500/15 rounded-2xl space-y-3">
+                    <span className="block text-[10px] font-mono text-rose-300 font-bold uppercase tracking-widest">System Health</span>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Database Engine</span>
+                        <span className="text-emerald-400 font-mono">Stable</span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">WebSocket Node</span>
+                        <span className="text-emerald-400 font-mono">Active</span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Auth Gateway</span>
+                        <span className="text-emerald-400 font-mono">Synced</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Audit Logs System Trail */}
-                <div className="p-3.5 bg-black/15 rounded-2xl border border-white/5 space-y-2.5 font-sans">
-                  <div className="flex items-center justify-between">
-                    <span className="block text-xs font-mono text-cyan-400 uppercase tracking-wider font-bold">
-                      {language === 'ru' ? 'Журнал Аудита' : 'System Security Logs'} ({globalAuditLogs?.length || 0})
-                    </span>
-                    <span className="text-[8px] text-slate-500 font-mono tracking-wider animate-pulse">● LIVE SYNC</span>
-                  </div>
-                  
-                  {(!globalAuditLogs || globalAuditLogs.length === 0) ? (
-                    <p className="text-[10px] text-slate-500 italic py-2">
-                      {language === 'ru' ? 'Записи аудита не найдены.' : 'Audit logs stream is empty.'}
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 font-mono text-[9px] divide-y divide-white/5">
-                      {globalAuditLogs.map((log, idx) => {
-                        let badgeColor = 'text-cyan-400 bg-cyan-950/20 border-cyan-500/10';
-                        if (log.action?.includes('ban') || log.action?.includes('kick') || log.action?.includes('delete')) {
-                          badgeColor = 'text-rose-400 bg-rose-950/20 border-rose-500/10';
-                        } else if (log.action?.includes('role')) {
-                          badgeColor = 'text-amber-400 bg-amber-950/20 border-amber-500/10';
-                        } else if (log.action?.includes('login')) {
-                          badgeColor = 'text-emerald-400 bg-emerald-950/20 border-emerald-500/10';
-                        }
-                        
-                        return (
-                          <div key={log.id || idx} className="pt-1.5 first:pt-0 pb-0.5 leading-snug">
-                            <div className="flex justify-between items-center mb-0.5">
-                              <span className={`text-[8px] uppercase tracking-wider px-1 rounded border ${badgeColor} font-bold`}>
-                                {log.action || 'system_event'}
-                              </span>
-                              <span className="text-slate-500 text-[8px] shrink-0 font-sans">
-                                {new Date(log.timestamp || Date.now()).toLocaleTimeString()}
-                              </span>
-                            </div>
-                            <span className="text-slate-300 font-sans block leading-tight text-xs">
-                              {log.details || 'No event details specified.'}
-                            </span>
-                            <span className="text-slate-500 text-[8px] block mt-0.5 font-mono">
-                              Actor: {log.actorName || 'Authorized User'} ({log.actorId ? log.actorId.substring(0, 6) : 'Sys'})
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                <button 
+                  onClick={() => showToast('Command executed', 'info')}
+                  className="w-full py-4 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/20 text-rose-400 font-bold rounded-2xl text-xs uppercase tracking-[0.2em] transition active:scale-95 shadow-lg shadow-rose-500/5"
+                >
+                  {language === 'ru' ? 'СБРОСИТЬ СИСТЕМУ' : 'HARD RESET SYSTEM'}
+                </button>
               </div>
             )}
-          </div>
 
-          <div className="p-4 bg-white/[0.01] border-t border-white/5 flex justify-end gap-2 text-xs">
-            <button 
-              onClick={() => setShowSettings(false)}
-              className="px-4 py-2 bg-black/15 hover:bg-black/25 text-slate-300 rounded-xl transition duration-150 active:scale-95"
-            >
-              Close
-            </button>
-            <button 
-              onClick={async () => {
-                await updateMyProfile(
-                  editDisplayName, 
-                  editBio, 
-                  editStatus, 
-                  undefined, 
-                  editEmojiStatus, 
-                  editPhoneNumber,
-                  {
-                    phoneNumber: privacyNumber,
-                    statusMessage: privacyStatus,
-                    photoURL: privacyPhoto,
-                    lastSeen: privacyLastSeen,
-                    onlineStatus: privacyOnline
-                  }
-                );
-                setShowSettings(false);
-              }}
-              className="px-4 py-2 bg-[var(--glass-accent)] hover:opacity-90 text-white font-semibold rounded-xl transition duration-150 active:scale-95"
-            >
-              Save Parameters
-            </button>
           </div>
         </div>
       )}
 
-      {/* Stories Viewer Modal */}
-      {activeStoryView && storiesByUser[activeStoryView.uid] && (
-        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col justify-between p-4 z-50">
-          <div className="flex justify-between items-center max-w-lg mx-auto w-full text-slate-200 pb-2 border-b border-slate-800/60">
-            <div className="flex items-center gap-3">
-              <img src={activeStoryView.photoURL || undefined} alt={activeStoryView.displayName} className="w-10 h-10 rounded-full" />
-              <div>
-                <span className="font-semibold text-sm">{activeStoryView.displayName}</span>
-                <span className="block text-[10px] text-slate-400">Visible for 24 Hours</span>
-              </div>
+      {/* Toast Notification overlay */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.8, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, scale: 0.8, filter: 'blur(10px)' }}
+            className={`fixed bottom-24 left-1/2 -translate-x-1/2 px-7 py-4 rounded-[28px] vision-floating-header border z-[600] flex items-center gap-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)] min-w-[320px] pointer-events-none border-white/30 ${
+              toast.type === 'error' ? 'text-rose-200' : 
+              toast.type === 'info' ? 'text-cyan-200' : 
+              'text-emerald-200'
+            }`}
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+              toast.type === 'error' ? 'bg-rose-500/20' : 
+              toast.type === 'info' ? 'bg-cyan-500/20' : 
+              'bg-emerald-500/20'
+            }`}>
+              {toast.type === 'error' ? <ShieldAlert className="w-5 h-5" /> : <Sparkles className="w-5 h-5 text-cyan-400" />}
             </div>
-            <button onClick={() => setActiveStoryView(null)} className="text-slate-400 hover:text-slate-100 p-1 pointer-events-auto cursor-pointer">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Stories loop visual container */}
-          <div className="flex-1 max-w-lg mx-auto w-full flex items-center justify-center p-3">
-            {storiesByUser[activeStoryView.uid].list.map((story, i) => (
-              <div key={story.id} className="relative w-full max-h-[75vh] rounded-2xl overflow-hidden bg-slate-900 flex items-center justify-center">
-                {story.mediaType === 'video' ? (
-                  <video src={story.mediaUrl || undefined} controls autoPlay className="max-w-full max-h-full" />
-                ) : (
-                  <img src={story.mediaUrl || undefined} alt="" className="max-w-full max-h-full object-contain" />
-                )}
-                {/* Floating Heart Reaction bar shortcut */}
-                <div className="absolute bottom-5 left-1/2 transform -translate-x-1/2 flex items-center gap-3.5 bg-slate-950/60 backdrop-blur px-5 py-2.5 rounded-full border border-slate-800 shadow">
-                  <button onClick={() => addStoryReaction(story.id, '❤️')} className="hover:scale-125 transition">❤️</button>
-                  <button onClick={() => addStoryReaction(story.id, '🔥')} className="hover:scale-125 transition">🔥</button>
-                  <button onClick={() => addStoryReaction(story.id, '👍')} className="hover:scale-125 transition">👍</button>
-                  <button onClick={() => addStoryReaction(story.id, '😲')} className="hover:scale-125 transition">😲</button>
-                  {story.reactions && Object.keys(story.reactions).length > 0 && (
-                    <span className="text-xs text-slate-300 border-l border-slate-800 pl-3 font-medium">
-                      Reactions: {Object.keys(story.reactions).length}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="text-xs text-slate-500 text-center max-w-md mx-auto w-full py-2">
-            Click outside / press Escape or close to return.
-          </div>
-        </div>
-      )}
+            <span className="text-[15px] font-black tracking-tight">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

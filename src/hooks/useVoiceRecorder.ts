@@ -66,6 +66,7 @@ export function useVoiceRecorder(
     clearInterval(durationTimerRef.current);
     setVoicePreviewBlob(null);
     setVoicePreviewDuration(0);
+    recordingStartTimeRef.current = 0;
     if (streamRef.current) {
       try {
         streamRef.current.getTracks().forEach(track => {
@@ -108,7 +109,20 @@ export function useVoiceRecorder(
       }
       streamRef.current = stream;
       
-      const mediaRecorder = new MediaRecorder(stream);
+      let options: MediaRecorderOptions = {};
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          options = { mimeType: 'audio/ogg;codecs=opus', audioBitsPerSecond: 128000 };
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options = { mimeType: 'audio/mp4', audioBitsPerSecond: 128000 };
+        } else {
+          options = { audioBitsPerSecond: 128000 };
+        }
+      }
+      
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       shouldSendOnStopRef.current = false;
@@ -200,26 +214,18 @@ export function useVoiceRecorder(
     if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') {
       isCancelledRef.current = true;
       resetRecordingState();
+      return;
     }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {}
-    }
-    if (streamRef.current) {
-      try {
+    try {
+      mediaRecorderRef.current.stop();
+      if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
           track.enabled = false;
         });
-      } catch (e) {}
-      streamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-  }, []);
+      }
+    } catch (e) {}
+  }, [resetRecordingState]);
 
   const cancelRecording = useCallback(() => {
     isCancelledRef.current = true;
@@ -251,12 +257,14 @@ export function useVoiceRecorder(
   }, [resetRecordingState]);
 
   const handleRecordMove = useCallback((clientX: number, clientY: number) => {
-    if (recordingState !== 'holding') return;
+    if (recordingState !== 'holding' && recordingStartTimeRef.current === 0) return;
     
     setRecordGestures(prev => {
-      const current = { ...prev, currentX: clientX, currentY: clientY };
-      const distanceX = prev.startX - clientX;
-      const distanceY = prev.startY - clientY;
+      const startX = prev.startX || clientX;
+      const startY = prev.startY || clientY;
+      const current = { startX, startY, currentX: clientX, currentY: clientY };
+      const distanceX = startX - clientX;
+      const distanceY = startY - clientY;
       
       if (distanceX > 80) {
         setTimeout(() => cancelRecording(), 10);
@@ -268,13 +276,16 @@ export function useVoiceRecorder(
   }, [recordingState, cancelRecording]);
 
   const handleRecordRelease = useCallback(() => {
-    if (recordingState === 'holding') {
-      const distanceX = recordGestures.startX - recordGestures.currentX;
-      const distanceY = recordGestures.startY - recordGestures.currentY;
+    if (recordingState === 'holding' || recordingStartTimeRef.current > 0) {
+      const startX = recordGestures.startX || recordGestures.currentX;
+      const startY = recordGestures.startY || recordGestures.currentY;
+      const distanceX = startX - recordGestures.currentX;
+      const distanceY = startY - recordGestures.currentY;
       const holdDuration = Date.now() - recordingStartTimeRef.current;
       
-      if (holdDuration < 150) {
+      if (holdDuration < 250) {
         cancelRecording();
+        onToggleMode?.();
       } else if (distanceX > 80) {
         cancelRecording();
       } else if (distanceY > 60) {
