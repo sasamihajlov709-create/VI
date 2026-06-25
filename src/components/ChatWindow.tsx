@@ -48,7 +48,8 @@ import {
   ChevronLeft,
   BarChart3,
   Bell,
-  BellOff
+  BellOff,
+  MoreVertical
 } from 'lucide-react';
 import { useMessenger } from '../context/MessengerContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -1673,14 +1674,25 @@ export const ChatWindow: React.FC = () => {
         </div>
       )}
 
-      {/* VisionOS Floating Header Container */}
-      <div className="absolute top-0 left-0 right-0 p-4 md:p-6 z-[150] pointer-events-none flex justify-center">
-        <div className="w-full max-w-6xl h-[72px] vision-floating-header rounded-[36px] flex items-center justify-between px-5 md:px-7 pointer-events-auto animate-fade-in-down transition-all duration-500 shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
-          <div className="flex items-center gap-4 min-w-0">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div
+          key={activeChat.id}
+          initial={{ opacity: 0, scale: 0.96, filter: 'blur(12px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.96, filter: 'blur(12px)' }}
+          transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute inset-0 flex flex-col pointer-events-none"
+        >
+          <div className="flex-1 flex flex-col relative w-full h-full pointer-events-auto">
+
+            {/* Telegram-style Glass Header */}
+      <div className="absolute top-0 left-0 right-0 z-[150] flex justify-center pointer-events-none">
+        <div className="w-full h-[60px] md:h-[64px] bg-[var(--glass-bg)] backdrop-blur-3xl border-b border-[var(--glass-border)] flex items-center justify-between px-3 md:px-5 pointer-events-auto shadow-[0_4px_30px_rgba(0,0,0,0.1)]">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <button 
               type="button"
               onClick={() => setActiveChat(null)}
-              className="md:hidden w-11 h-11 flex items-center justify-center text-[var(--glass-text-muted)] hover:text-cyan-400 transition-all cursor-pointer active:scale-90 bg-[var(--glass-bg-hover)] rounded-full border border-[var(--glass-border)]"
+              className="md:hidden w-10 h-10 flex items-center justify-center text-[var(--glass-text-muted)] hover:text-cyan-400 transition-all cursor-pointer active:scale-90 bg-transparent rounded-full"
             >
               <ChevronLeft className="w-7 h-7" />
             </button>
@@ -1697,15 +1709,15 @@ export const ChatWindow: React.FC = () => {
                   setIsRightPanelOpen(true);
                 }
               }}
-              className="flex items-center gap-3 md:gap-4 flex-1 min-w-0 cursor-pointer group/profile"
+              className="flex items-center gap-3 cursor-pointer group/profile hover:bg-[var(--glass-bg-hover)] px-2 py-1.5 rounded-xl transition-all min-w-0"
             >
               {(() => {
                 const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
                 const isActiveFavorites = activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid;
                 if (isActiveFavorites) {
                   return (
-                    <div className="w-10 h-10 md:w-13 md:h-13 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center border border-white/20 shadow-lg shrink-0 group-hover/profile:scale-105 transition-transform duration-300">
-                      <Bookmark className="w-5 h-5 md:w-6 h-6 text-white fill-white/20" />
+                    <div className="w-[38px] h-[38px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center border border-white/20 shrink-0 group-hover/profile:scale-105 transition-transform duration-300">
+                      <Bookmark className="w-5 h-5 text-white fill-white/20" />
                     </div>
                   );
                 }
@@ -1714,10 +1726,10 @@ export const ChatWindow: React.FC = () => {
                     <img 
                       src={activeChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(activeChat.title)}`} 
                       alt={activeChat.title} 
-                      className="w-10 h-10 md:w-13 md:h-13 rounded-full object-cover border border-white/20 shadow-lg" 
+                      className="w-[38px] h-[38px] rounded-full object-cover border border-white/10" 
                     />
                     {activeChat.type === 'direct' && !isActiveFavorites && (
-                      <div className={`absolute right-0 bottom-0 w-3.5 h-3.5 rounded-full border-2 border-[#0f0f0f] shadow-lg ${
+                      <div className={`absolute -right-0.5 -bottom-0.5 w-3 h-3 rounded-full border-2 border-[var(--glass-bg)] ${
                         onlineUsers[activeChat.members.find(m => m !== currentUser?.uid) || ''] === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
                       }`} />
                     )}
@@ -1726,7 +1738,7 @@ export const ChatWindow: React.FC = () => {
               })()}
               
               <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-[16px] md:text-[19px] text-[var(--glass-text)] truncate leading-tight group-hover/profile:text-cyan-400 transition-colors tracking-tight">
+                <h3 className="font-semibold text-[15px] md:text-[16px] text-[var(--glass-text)] truncate leading-tight group-hover/profile:text-cyan-400 transition-colors tracking-tight">
                   {(() => {
                     const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
                     return activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid
@@ -1734,28 +1746,19 @@ export const ChatWindow: React.FC = () => {
                       : activeChat.title;
                   })()}
                 </h3>
-                <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                <div className="flex items-center gap-2 mt-0 min-w-0">
                   {typingUsers.length > 0 ? (
-                    <span className="text-[11px] text-cyan-400 font-semibold animate-pulse flex items-center gap-1.5 leading-none">
-                      <div className="flex gap-0.5">
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
+                    <span className="text-[12px] text-cyan-400 font-medium animate-pulse flex items-center gap-1.5 leading-none">
                       {typingUsers.join(', ')} {typingUsers.length > 1 ? (language === 'ru' ? 'печатают...' : 'are typing...') : (language === 'ru' ? 'печатает...' : 'is typing...')}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-slate-400 flex items-center gap-1.5 font-medium leading-none truncate opacity-80 uppercase tracking-wider font-mono">
+                    <span className="text-[12px] text-[var(--glass-text-muted)] flex items-center gap-1.5 font-medium leading-none truncate">
                       {(() => {
                         const uniqueMembersCount = [...new Set(activeChat.members || [])].length;
                         const isActiveFavorites = activeChat.type === 'direct' && uniqueMembersCount === 1 && activeChat.members[0] === currentUser?.uid;
                         if (isActiveFavorites) {
                           return (
-                            <>
-                              <span className="text-cyan-400/90">{language === 'ru' ? 'Избранное' : 'Favorites'}</span> 
-                              <span className="text-slate-600">&bull;</span> 
-                              <span className="text-indigo-400/90">{language === 'ru' ? 'Облако' : 'Storage'}</span>
-                            </>
+                            <span className="text-[var(--glass-text-muted)]">{language === 'ru' ? 'Облако' : 'Storage'}</span>
                           );
                         }
                         
@@ -1763,20 +1766,20 @@ export const ChatWindow: React.FC = () => {
                           const partnerId = activeChat.members?.find(id => id !== currentUser?.uid);
                           const isOnline = partnerId && onlineUsers[partnerId] === 'online';
                           return isOnline 
-                            ? <span className="text-emerald-400 font-bold tracking-widest">{language === 'ru' ? 'в сети' : 'online'}</span> 
-                            : <span className="text-slate-500">{language === 'ru' ? 'не в сети' : 'offline'}</span>;
+                            ? <span className="text-emerald-500 font-medium">{language === 'ru' ? 'в сети' : 'online'}</span> 
+                            : <span className="text-[var(--glass-text-muted)]">{language === 'ru' ? 'был(а) недавно' : 'last seen recently'}</span>;
                         }
                         
                         return (
                           <>
-                            <span className="text-slate-400">{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
+                            <span>{activeChat.members?.length || 0} {language === 'ru' ? 'участников' : 'members'}</span>
                             {(() => {
                               const chatOnlineCount = activeChat.members?.filter(uid => onlineUsers[uid] === 'online' && uid !== currentUser?.uid).length || 0;
                               if (chatOnlineCount > 0) {
                                 return (
                                   <>
                                     <span className="text-slate-600">&bull;</span>
-                                    <span className="text-emerald-400 font-bold">{chatOnlineCount} {language === 'ru' ? 'онлайн' : 'online'}</span>
+                                    <span className="text-emerald-500 font-medium">{chatOnlineCount} {language === 'ru' ? 'онлайн' : 'online'}</span>
                                   </>
                                 );
                               }
@@ -1792,8 +1795,7 @@ export const ChatWindow: React.FC = () => {
             </div>
           </div>
 
-          {/* Action bar channels */}
-          <div className="flex items-center gap-1.5 md:gap-3">
+          <div className="flex items-center gap-1 shrink-0">
             {(() => {
               const scheduledCount = messages.filter(m => m.chatId === activeChat.id && m.scheduledAt && Date.now() < m.scheduledAt && m.senderId === currentUser?.uid).length;
               if (scheduledCount > 0) {
@@ -1801,11 +1803,10 @@ export const ChatWindow: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewScheduledMode(!viewScheduledMode)}
-                    className={`w-9 h-9 md:w-11 md:h-11 rounded-full cursor-pointer transition-all relative flex items-center justify-center ${viewScheduledMode ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-amber-400 hover:text-amber-300 bg-white/5 border border-white/10 shadow-lg'}`}
-                    title={language === 'ru' ? 'Отложенные сообщения' : 'Scheduled Messages'}
+                    className={`w-9 h-9 rounded-full cursor-pointer transition-all relative flex items-center justify-center ${viewScheduledMode ? 'bg-cyan-500/20 text-cyan-400' : 'text-amber-400 hover:bg-[var(--glass-bg-hover)]'}`}
                   >
-                    <Clock className="w-5 h-5 md:w-5.5 md:h-5.5" />
-                    <span className="absolute -top-1 -right-1 bg-amber-500 text-[10px] text-slate-950 font-black rounded-full w-4.5 h-4.5 flex items-center justify-center border-2 border-[#1a1a1a]">
+                    <Clock className="w-5 h-5" />
+                    <span className="absolute top-0 right-0 bg-amber-500 text-[10px] text-white font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center">
                       {scheduledCount}
                     </span>
                   </button>
@@ -1821,32 +1822,39 @@ export const ChatWindow: React.FC = () => {
                 if (viewScheduledMode) setViewScheduledMode(false);
                 if (showInChatSearch) setSearchInChatQuery('');
               }}
-              className={`w-9 h-9 md:w-11 md:h-11 rounded-full cursor-pointer transition-all flex items-center justify-center ${showInChatSearch ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_20px_rgba(34,211,238,0.2)]' : 'text-slate-400 hover:text-slate-200 bg-white/5 border border-white/10 shadow-lg'}`}
-              title={language === 'ru' ? 'Поиск сообщений' : 'Search Message History'}
+              className={`w-9 h-9 rounded-full cursor-pointer transition-all flex items-center justify-center ${showInChatSearch ? 'bg-cyan-500/20 text-cyan-400' : 'text-[var(--glass-text-muted)] hover:text-cyan-400 hover:bg-[var(--glass-bg-hover)]'}`}
             >
-              <Search className="w-5 h-5 md:w-5.5 md:h-5.5" />
+              <Search className="w-[18px] h-[18px]" />
             </button>
 
             {activeChat.type === 'direct' && (
-              <div className="flex items-center gap-1.5 md:gap-3">
+              <div className="flex items-center gap-1 hidden sm:flex">
                 <button 
                   type="button"
                   onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'voice')}
-                  className="w-9 h-9 md:w-11 md:h-11 text-slate-400 hover:text-emerald-400 rounded-full cursor-pointer transition bg-white/5 border border-white/10 shadow-lg flex items-center justify-center"
-                  title={language === 'ru' ? 'Голосовой звонок' : 'Initiate Voice Channel'}
+                  className="w-9 h-9 text-[var(--glass-text-muted)] hover:text-emerald-400 hover:bg-[var(--glass-bg-hover)] rounded-full cursor-pointer transition flex items-center justify-center"
                 >
-                  <Phone className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                  <Phone className="w-[18px] h-[18px]" />
                 </button>
                 <button 
                   type="button"
                   onClick={() => initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'video')}
-                  className="w-9 h-9 md:w-11 md:h-11 text-slate-400 hover:text-indigo-400 rounded-full cursor-pointer transition bg-white/5 border border-white/10 shadow-lg flex items-center justify-center"
-                  title={language === 'ru' ? 'Видеозвонок' : 'Initiate Secure Video Call'}
+                  className="w-9 h-9 text-[var(--glass-text-muted)] hover:text-indigo-400 hover:bg-[var(--glass-bg-hover)] rounded-full cursor-pointer transition flex items-center justify-center"
                 >
-                  <Video className="w-5 h-5 md:w-5.5 md:h-5.5" />
+                  <Video className="w-[18px] h-[18px]" />
                 </button>
               </div>
             )}
+            <button 
+              type="button"
+              onClick={() => {
+                if ('vibrate' in navigator) navigator.vibrate(5);
+                setIsRightPanelOpen(!isRightPanelOpen);
+              }}
+              className="w-9 h-9 flex items-center justify-center rounded-full text-[var(--glass-text-muted)] hover:text-cyan-400 hover:bg-[var(--glass-bg-hover)] transition-all cursor-pointer active:scale-95"
+            >
+              <MoreVertical className="w-[18px] h-[18px]" />
+            </button>
           </div>
         </div>
       </div>
@@ -2091,9 +2099,10 @@ export const ChatWindow: React.FC = () => {
             </div>
           </motion.div>
         ) : (
-          (() => {
-            const elements: React.ReactNode[] = [];
-            let lastDateStr = '';
+          <AnimatePresence initial={false}>
+            {(() => {
+              const elements: React.ReactNode[] = [];
+              let lastDateStr = '';
 
             paginatedMessages.forEach((msg, idx) => {
               // 1. Group by day date separator headings
@@ -2362,13 +2371,13 @@ export const ChatWindow: React.FC = () => {
                            clearTimeout(parseInt(pendingSingleTap));
                          }
                       }}
-                      className={`message-bubble relative transition-all duration-300 backdrop-blur-xl min-w-[80px] ${
+                      className={`message-bubble relative transition-all duration-300 backdrop-blur-xl min-w-[50px] ${
                         msg.type === 'sticker' || isCircularVideo
                           ? 'border-transparent bg-transparent p-0 shadow-none backdrop-blur-none' 
                           : isMe 
-                            ? `py-1.5 px-3 border border-white/20 glass-bubble-out shadow-[0_5px_15px_rgba(0,122,255,0.1)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-out' : ''}` 
-                            : `py-1.5 px-3 border border-white/10 glass-bubble-in shadow-[0_5px_15px_rgba(0,0,0,0.05)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-in' : ''}`
-                      } ${activeMessageMenuId === msg.id ? 'ring-2 ring-white/40 scale-[1.02] shadow-[0_0_60px_rgba(255,255,255,0.15)]' : ''}`}
+                            ? `py-1.5 px-3 border border-white/20 glass-bubble-out shadow-[0_2px_10px_var(--glass-shadow)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-out' : ''}` 
+                            : `py-1.5 px-3 border border-[var(--glass-border)] glass-bubble-in shadow-[0_2px_10px_var(--glass-shadow)] font-sans ${bubbleRadius} ${!isConsecutiveNext ? 'bubble-tail-in' : ''}`
+                      } ${activeMessageMenuId === msg.id ? 'ring-2 ring-[var(--glass-border-focus)] scale-[1.02] shadow-[0_0_40px_var(--glass-glow)]' : ''}`}
                     >
                       {/* Reply To info block */}
                       {msg.replyTo && (
@@ -2646,7 +2655,8 @@ export const ChatWindow: React.FC = () => {
             });
 
             return elements;
-          })()
+          })()}
+          </AnimatePresence>
         )}
 
         {/* Real-time Dynamic Upload indicator for pending assets */}
@@ -3158,20 +3168,30 @@ export const ChatWindow: React.FC = () => {
               <div className={`flex flex-1 relative items-center transition-all duration-500 opacity-100 scale-100 translate-y-0`}>
                 <div className="flex-1 glass-pill pl-4 pr-3 py-2.5 flex items-center gap-2 min-h-[60px] transition-all focus-within:ring-1 focus-within:ring-white/20 relative z-40 group">
                   
-                  {/* 1. Paperclip for attachments */}
-                  <div className={`flex flex-1 items-center gap-2 transition-all duration-300 ${isRecording ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-                    <button 
-                      type="button"
-                      disabled={cooldownRemaining > 0}
-                      onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
-                      className={`transition-all duration-400 cursor-pointer shrink-0 disabled:opacity-30 p-2.5 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showAttachmentDropdown ? 'text-cyan-400 bg-cyan-500/20 rotate-45 scale-110 shadow-lg' : 'text-[var(--glass-text-muted)]'}`}
-                      title={language === 'ru' ? 'Прикрепить' : 'Attach'}
-                    >
-                      <Paperclip className="w-6.5 h-6.5" />
-                    </button>
+                  {/* 1 & 2. Left Actions (Emoji + Attachment) & Center Input */}
+                  <div className={`flex flex-1 items-end gap-2 transition-all duration-300 ${isRecording ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+                    <div className="flex items-center pb-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowStickerPicker(!showStickerPicker)}
+                        className={`text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-all cursor-pointer p-2 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showStickerPicker ? 'text-cyan-400 bg-cyan-500/20' : ''}`}
+                        title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
+                      >
+                        <Smile className="w-[26px] h-[26px]" />
+                      </button>
+                      <button 
+                        type="button"
+                        disabled={cooldownRemaining > 0}
+                        onClick={() => setShowAttachmentDropdown(!showAttachmentDropdown)}
+                        className={`transition-all duration-400 cursor-pointer disabled:opacity-30 p-2 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showAttachmentDropdown ? 'text-cyan-400 bg-cyan-500/20 rotate-45 scale-110 shadow-lg' : 'text-[var(--glass-text-muted)]'}`}
+                        title={language === 'ru' ? 'Прикрепить' : 'Attach'}
+                      >
+                        <Paperclip className="w-[26px] h-[26px]" />
+                      </button>
+                    </div>
 
-                    {/* 2. Compact text input Area */}
-                    <div className="flex-1 min-w-0 bg-[var(--glass-bg-hover)] rounded-[24px] backdrop-blur-md border border-[var(--glass-border)] px-4">
+                    {/* Compact text input Area */}
+                    <div className="flex-1 min-w-0 bg-[var(--glass-bg-hover)] rounded-3xl backdrop-blur-3xl border border-[var(--glass-border)] px-4 flex items-center">
                       <TextareaAutosize 
                         ref={inputRef as any}
                         value={inputText}
@@ -3194,21 +3214,11 @@ export const ChatWindow: React.FC = () => {
                             ? (language === 'ru' ? `Подождите ${cooldownRemaining}с...` : `Wait ${cooldownRemaining}s...`)
                             : editTarget 
                               ? (language === 'ru' ? "Изменить..." : "Change text...") 
-                              : (language === 'ru' ? "Cообщение..." : "Message...")
+                              : (language === 'ru' ? "Сообщение..." : "Message...")
                         }
-                        className="w-full bg-transparent text-[var(--glass-text)] text-[15px] focus:outline-none placeholder-[var(--glass-text-muted)] min-h-[36px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-0.5 py-2 selection:bg-cyan-500/30"
+                        className="w-full bg-transparent text-[var(--glass-text)] text-[16px] focus:outline-none placeholder-[var(--glass-text-muted)] min-h-[40px] outline-none disabled:opacity-50 resize-none overflow-y-auto custom-scrollbar my-1 py-2 selection:bg-cyan-500/30"
                       />
                     </div>
-
-                    {/* 3. Smile Sticker picker */}
-                    <button
-                      type="button"
-                      onClick={() => setShowStickerPicker(!showStickerPicker)}
-                      className={`text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-all cursor-pointer shrink-0 p-2.5 rounded-full hover:bg-[var(--glass-bg-hover)] active:scale-90 ${showStickerPicker ? 'text-cyan-400 bg-cyan-500/20' : ''}`}
-                      title={language === 'ru' ? 'Выбрать стикер/эмодзи' : t.chooseSticker}
-                    >
-                      <Smile className="w-6.5 h-6.5" />
-                    </button>
                   </div>
 
                   {/* Recording UI overlay inside pill */}
@@ -3923,6 +3933,10 @@ export const ChatWindow: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+          </div>
+        </motion.div>
+      </AnimatePresence>
+
       {floatingHearts.map(heart => (
         <span 
           key={heart.id} 

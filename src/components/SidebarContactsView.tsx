@@ -142,7 +142,7 @@ export const SidebarContactsView: React.FC<SidebarContactsViewProps> = ({
       )}
 
       {/* Contacts List stream */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 pb-32 space-y-1.5 custom-scrollbar">
         {filteredContacts.length === 0 ? (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}

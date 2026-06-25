@@ -552,7 +552,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pb-32 p-5 space-y-5 custom-scrollbar">
             {/* Upper Profile Identity Block */}
             <div className="p-6 vision-floating-header border border-white/10 rounded-[28px] flex flex-col items-center text-center gap-4 relative overflow-hidden group shadow-2xl">
               <div className="absolute top-0 right-0 p-1">
@@ -672,7 +672,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             <span className="text-xs font-bold text-slate-150">{t.secAccount}</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pb-32 p-4 space-y-4 custom-scrollbar">
             {/* Identity fields */}
             <div className="space-y-3">
               <span className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">
@@ -824,7 +824,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pb-32 p-4 space-y-4 custom-scrollbar">
             {/* 3.1 Text Size selection with active chat bubble preview */}
             <div className="p-3 bg-white/[0.02] border border-white/5 rounded-2xl space-y-3">
               <div>
@@ -1256,7 +1256,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             <span className="text-xs font-bold text-slate-150">{t.secPrivacy}</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pb-32 p-4 space-y-4 custom-scrollbar">
             <div className="p-3 bg-white/[0.02] border border-white/5 rounded-2xl space-y-3">
               <span className="block text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">
                 {t.privacyWho}
@@ -1341,7 +1341,7 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
             <span className="text-xs font-bold text-slate-150">{t.secThemes}</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto pb-32 p-4 space-y-4 custom-scrollbar">
             {/* Main theme controller block */}
             <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-3 text-center">
               <span className="inline-block p-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl mb-1">

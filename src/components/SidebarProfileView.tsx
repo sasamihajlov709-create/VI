@@ -80,7 +80,7 @@ export const SidebarProfileView: React.FC<SidebarProfileViewProps> = ({
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-5 pb-32 space-y-6 custom-scrollbar">
         {/* Profile Card Block */}
         <div className="relative overflow-hidden vision-floating-header rounded-[28px] border border-white/10 shadow-2xl flex flex-col">
           {/* Cover Banner with matching gradient */}

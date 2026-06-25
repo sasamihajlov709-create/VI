@@ -57,6 +57,7 @@ import { logger } from '../lib/logger';
 import { SidebarContactsView } from './SidebarContactsView';
 import { SidebarProfileView } from './SidebarProfileView';
 import { SidebarSettingsView } from './SidebarSettingsView';
+import { GlassDock } from './GlassDock';
 
 export const Sidebar: React.FC = () => {
   const { 
@@ -766,7 +767,7 @@ export const Sidebar: React.FC = () => {
   const listContainerRef = useRef<HTMLDivElement>(null);
   const { virtualItems, totalHeight } = useVirtual({
     itemCount: filteredChats.length,
-    itemHeight: 76,
+    itemHeight: 72,
     containerRef: listContainerRef,
     buffer: 5,
   });
@@ -914,56 +915,57 @@ export const Sidebar: React.FC = () => {
 
       {/* Scrollable / Swipeable content container wrapper */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
-        <div 
-          className="flex-1 overflow-hidden relative"
-        >
-        <div 
-          ref={swipeContainerRef}
-          className="flex h-full w-[400%]"
-          style={{
-            transform: `translate3d(${-activeIndex * 25}%, 0, 0)`,
-            transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)',
-            willChange: 'transform'
-          }}
-        >
-          {/* Panel 0: Chats */}
-          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-hidden relative">
+        <AnimatePresence mode="popLayout" initial={false}>
+          {sidebarView === 'chats' && (
+            <motion.div 
+              key="chats"
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-hidden"
+            >
             {/* Dynamic Header - Optimized for Telegram look */}
-            <div className="pt-1 pb-1 px-4 flex flex-col gap-1 backdrop-blur-3xl shadow-xl transition-all duration-300 relative z-20 border-b border-white/5" style={{ background: 'var(--glass-header-bg)' }}>
+            <div className="pt-2 pb-2 px-3 flex flex-col gap-2 backdrop-blur-3xl shadow-sm transition-all duration-300 relative z-20 border-b border-[var(--glass-border)]" style={{ background: 'var(--glass-header-bg)' }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-[12px] bg-gradient-to-br from-purple-800 to-indigo-900 flex items-center justify-center font-black text-white text-[11px] shadow-lg shadow-purple-500/25 border border-white/20 overflow-hidden">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center font-bold text-white text-[12px] shadow-sm border border-white/10 overflow-hidden shrink-0">
                     VI
                   </div>
                   <div className="flex flex-col">
-                    <span className="font-bold tracking-tight text-md text-[var(--glass-text)]">{language === 'ru' ? 'Чаты' : 'Chats'}</span>
-                    <div className="flex items-center gap-1 mt-0">
+                    <span className="font-semibold tracking-tight text-[15px] text-[var(--glass-text)] leading-none">{language === 'ru' ? 'VI Messenger' : 'VI Messenger'}</span>
+                    <div className="flex items-center gap-1 mt-1">
                       <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)] animate-pulse" />
-                      <span className="text-[8px] text-slate-400 font-bold uppercase tracking-[0.1em] font-mono">{language === 'ru' ? 'Онлайн' : 'Online'}</span>
+                      <span className="text-[10px] text-[var(--glass-text-muted)] font-medium leading-none">{language === 'ru' ? 'онлайн' : 'online'}</span>
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  {/* Settings button removed to resolve duplicate settings */}
                   <button 
-                    className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-cyan-400 transition-all cursor-pointer md:hidden border border-white/10 active:scale-95 shadow-lg"
+                    className="w-8 h-8 flex items-center justify-center bg-transparent hover:bg-[var(--glass-bg-hover)] rounded-full text-[var(--glass-text-muted)] hover:text-cyan-400 transition-all cursor-pointer active:scale-95"
                     onClick={() => setShowCreateChat(true)}
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-[18px] h-[18px]" />
+                  </button>
+                  <button 
+                    className="w-8 h-8 flex items-center justify-center bg-transparent hover:bg-[var(--glass-bg-hover)] rounded-full text-[var(--glass-text-muted)] hover:text-cyan-400 transition-all cursor-pointer active:scale-95"
+                    onClick={() => setSidebarView('settings')}
+                  >
+                    <Settings className="w-[18px] h-[18px]" />
                   </button>
                 </div>
               </div>
 
               {/* Global Prefix Search Bar */}
-              <div className="relative group/search">
-                <Search className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within/search:text-cyan-400 transition-colors" />
+              <div className="relative group/search mt-1">
+                <Search className="w-[18px] h-[18px] absolute left-3 top-1/2 -translate-y-1/2 text-[var(--glass-text-muted)] group-focus-within/search:text-cyan-400 transition-colors" />
                 <input 
                   id="sidebar-search-input"
                   type="text" 
-                  placeholder={t.searchPlaceholder}
+                  placeholder={language === 'ru' ? 'Поиск сообщений, пользователей...' : 'Search messages, users...'}
                   value={searchQuery}
                   onChange={handleQueryChange}
-                  className="w-full pl-13 pr-6 py-3.5 bg-black/30 border border-white/10 hover:border-white/20 text-[15px] rounded-[24px] focus:border-cyan-400/50 focus:bg-black/50 focus:outline-none placeholder-slate-600 text-slate-100 transition-all duration-300 font-medium shadow-inner backdrop-blur-xl"
+                  className="w-full pl-10 pr-4 py-2 bg-[var(--glass-bg-hover)] border border-[var(--glass-border)] hover:border-[var(--glass-border-focus)] text-[14px] rounded-[12px] focus:border-[var(--glass-border-focus)] focus:bg-[var(--glass-bg-hover)] focus:outline-none placeholder-[var(--glass-text-muted)] text-[var(--glass-text)] transition-all duration-300 shadow-sm"
                 />
               </div>
 
@@ -1004,132 +1006,69 @@ export const Sidebar: React.FC = () => {
                 ))}
               </div>
 
-              {/* Horizontal Folder Tabs (Mobile only) */}
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-1 md:hidden relative h-11 select-none">
-                <button
-                  onClick={() => {
-                    setActiveFolder('all');
-                    if ('vibrate' in navigator) navigator.vibrate(5);
-                  }}
-                  className={`relative px-6 h-10 flex items-center transition-all duration-400 whitespace-nowrap cursor-pointer rounded-full ${
-                    activeFolder === 'all' 
-                      ? 'text-white font-bold' 
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {activeFolder === 'all' && (
-                    <motion.div 
-                      layoutId="activeFolderMobile"
-                      className="absolute inset-0 bg-white/10 vision-floating-header rounded-full border border-white/20 shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
-                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                    />
-                  )}
-                  <span className="text-[14px] tracking-tight relative z-10">{language === 'ru' ? 'Все' : 'All'}</span>
-                </button>
-
-              <button
-                onClick={() => {
-                  const favChat = chats.find(c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser?.uid);
-                  if (favChat) {
-                    setActiveChat(favChat);
-                    setActiveFolder('all');
-                  } else if (userProfile) {
-                    createDirectChat(userProfile);
-                    setActiveFolder('all');
-                  }
-                  if ('vibrate' in navigator) navigator.vibrate(5);
-                }}
-                className={`relative px-5 h-9 flex items-center transition-all duration-400 whitespace-nowrap cursor-pointer rounded-full ${
-                  activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1
-                    ? 'text-white font-bold' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 && (
-                  <motion.div 
-                    layoutId="activeFolderMobile"
-                    className="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-indigo-600 rounded-full shadow-[0_4px_15px_rgba(34,211,238,0.3)] border border-white/20"
-                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                  />
-                )}
-                <span className="text-[13.5px] tracking-tight relative z-10">{language === 'ru' ? 'Избранное' : 'Favorites'}</span>
-              </button>
-
-              {userProfile?.folders?.map(folder => {
-                const isActive = activeFolder === folder.id;
-                const hasUnreads = chats.some(c => folder.chatIds.includes(c.id) && currentUser && (c.unreadCounts?.[currentUser.uid] || 0) > 0);
-                return (
+              {/* Horizontal Folder Tabs (Unified) */}
+              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar px-2 mt-2 pb-1 select-none">
+                {[
+                  { id: 'all', label: language === 'ru' ? 'Все' : 'All' },
+                  { id: 'direct', label: language === 'ru' ? 'Личные' : 'Direct' },
+                  { id: 'groups', label: language === 'ru' ? 'Группы' : 'Groups' },
+                  { id: 'channels', label: language === 'ru' ? 'Каналы' : 'Channels' },
+                  { id: 'archived', label: language === 'ru' ? 'Архив' : 'Archive' }
+                ].map(tab => (
                   <button
-                    key={folder.id}
+                    key={tab.id}
                     onClick={() => {
-                      setActiveFolder(folder.id);
+                      setActiveFolder(tab.id);
                       if ('vibrate' in navigator) navigator.vibrate(5);
                     }}
-                    className={`relative px-4 h-8 flex items-center transition-all duration-300 whitespace-nowrap cursor-pointer rounded-full ${
-                      isActive 
-                        ? 'text-white font-bold' 
-                        : 'text-slate-400 hover:text-slate-200'
+                    className={`relative px-4 h-[34px] flex items-center justify-center transition-all duration-300 whitespace-nowrap cursor-pointer rounded-[10px] shrink-0 ${
+                      activeFolder === tab.id 
+                        ? 'text-[var(--glass-text)] font-medium' 
+                        : 'text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] hover:bg-[var(--glass-bg-hover)]'
                     }`}
                   >
-                    {isActive && (
+                    {activeFolder === tab.id && (
                       <motion.div 
-                        layoutId="activeFolderMobile"
-                        className="absolute inset-0 bg-white/10 rounded-full border border-white/10"
-                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        layoutId="activeFolderTab"
+                        className="absolute inset-0 bg-[var(--glass-bg-hover)] rounded-[10px] border border-[var(--glass-border)] shadow-sm"
+                        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                       />
                     )}
-                    <span className="text-[13px] tracking-wide relative z-10">{folder.name}</span>
-                    {hasUnreads && !isActive && (
-                      <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_6px_rgba(6,182,212,0.4)] relative z-10" />
-                    )}
+                    <span className="text-[14px] tracking-tight relative z-10">{tab.label}</span>
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Segmented Chats vs. Channels control (Desktop Only or Fallback) */}
-            <div className="hidden md:block pt-2">
-              <div className="grid grid-cols-2 p-1.5 vision-floating-header rounded-[22px] border border-white/10 text-[12px] shadow-2xl relative overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setActiveFolder('all')}
-                  className={`py-2.5 rounded-[18px] font-black cursor-pointer transition-all duration-400 relative z-10 ${
-                    activeFolder !== 'channels' 
-                      ? 'text-white' 
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {activeFolder !== 'channels' && (
-                    <motion.div 
-                      layoutId="segmentIndicator"
-                      className="absolute inset-0 bg-white/10 rounded-[18px] border border-white/20 shadow-lg"
-                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                    />
-                  )}
-                  <span className="relative z-20 uppercase tracking-widest">{language === 'ru' ? 'Чаты' : 'Chats'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveFolder('channels')}
-                  className={`py-2.5 rounded-[18px] font-black cursor-pointer transition-all duration-400 relative z-10 ${
-                    activeFolder === 'channels' 
-                      ? 'text-white' 
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {activeFolder === 'channels' && (
-                    <motion.div 
-                      layoutId="segmentIndicator"
-                      className="absolute inset-0 bg-white/10 rounded-[18px] border border-white/20 shadow-lg"
-                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                    />
-                  )}
-                  <span className="relative z-20 uppercase tracking-widest">{language === 'ru' ? 'Каналы' : 'Channels'}</span>
-                </button>
+                ))}
+                {userProfile?.folders?.map(folder => {
+                  const isActive = activeFolder === folder.id;
+                  const hasUnreads = chats.some(c => folder.chatIds.includes(c.id) && currentUser && (c.unreadCounts?.[currentUser.uid] || 0) > 0);
+                  return (
+                    <button
+                      key={folder.id}
+                      onClick={() => {
+                        setActiveFolder(folder.id);
+                        if ('vibrate' in navigator) navigator.vibrate(5);
+                      }}
+                      className={`relative px-4 h-[34px] flex items-center justify-center transition-all duration-300 whitespace-nowrap cursor-pointer rounded-[10px] shrink-0 ${
+                        isActive 
+                          ? 'text-[var(--glass-text)] font-medium' 
+                          : 'text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] hover:bg-[var(--glass-bg-hover)]'
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.div 
+                          layoutId="activeFolderTab"
+                          className="absolute inset-0 bg-[var(--glass-bg-hover)] rounded-[10px] border border-[var(--glass-border)] shadow-sm"
+                          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        />
+                      )}
+                      <span className="text-[14px] tracking-tight relative z-10">{folder.name}</span>
+                      {hasUnreads && !isActive && (
+                        <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-cyan-500 shadow-[0_0_6px_rgba(6,182,212,0.4)] relative z-10" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          </div>
-        </div>
 
       {/* Prefix live search results dropdown */}
       {searchResults.length > 0 && (
@@ -1216,7 +1155,7 @@ export const Sidebar: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div style={{ height: totalHeight, width: '100%', position: 'relative' }}>
+          <div style={{ height: totalHeight + 100, width: '100%', position: 'relative' }}>
             {virtualItems.map((item) => {
               const chat = filteredChats[item.index];
               if (!chat) return null;
@@ -1296,11 +1235,11 @@ export const Sidebar: React.FC = () => {
                     {/* Chat Thumbnail */}
                     <div className="relative shrink-0 select-none">
                       {isItemFavorites ? (
-                        <div className="w-[48px] h-[48px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
+                        <div className="w-[46px] h-[46px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
                           <Bookmark className="w-5.5 h-5.5 text-white fill-white/20" />
                         </div>
                       ) : (
-                        <div className="w-[48px] h-[48px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
+                        <div className="w-[46px] h-[46px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
                           <img 
                             src={chat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(chat.title)}`} 
                             alt={chat.title} 
@@ -1309,7 +1248,7 @@ export const Sidebar: React.FC = () => {
                         </div>
                       )}
                       {chat.type === 'direct' && !isItemFavorites && (
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 border-[#0C1322] absolute -right-0.5 -bottom-0.5 shadow-sm ${
+                        <div className={`w-3.5 h-3.5 rounded-full border-2 border-[var(--glass-bg)] absolute -right-0.5 -bottom-0.5 shadow-sm ${
                           chat.members.find(id => id !== currentUser?.uid) && onlineUsers[chat.members.find(id => id !== currentUser?.uid) || ''] === 'online' 
                             ? 'bg-emerald-500' 
                             : 'bg-slate-600'
@@ -1319,14 +1258,14 @@ export const Sidebar: React.FC = () => {
 
                     {/* Info block */}
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                      <div className="flex justify-between items-center mb-0.5">
-                        <span className="text-[15.5px] font-bold truncate text-slate-100 tracking-tight">
+                      <div className="flex justify-between items-baseline mb-0.5">
+                        <span className="text-[15px] font-semibold truncate text-[var(--glass-text)] tracking-tight pr-2">
                           {isItemFavorites ? (language === 'ru' ? 'Избранное' : 'Saved Messages') : chat.title}
                         </span>
                         {chat.lastMessage && (
-                          <div className="flex items-center gap-2 pl-2 shrink-0">
+                          <div className="flex items-center gap-1.5 pl-1 shrink-0">
                             {isPinned && <Pin className="w-3 h-3 text-cyan-400 -rotate-45" />}
-                            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider font-mono">
+                            <span className="text-[11px] text-[var(--glass-text-muted)] font-medium">
                               {new Date(chat.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
@@ -1334,7 +1273,7 @@ export const Sidebar: React.FC = () => {
                       </div>
                       
                       <div className="flex justify-between items-center">
-                        <p className="text-[13.5px] text-slate-400 truncate pr-2 flex items-center gap-1.5 font-medium">
+                        <p className="text-[13px] text-[var(--glass-text-muted)] truncate pr-2 flex items-center gap-1">
                           {getChatTypingIndicator(chat) ? (
                             <span className="text-cyan-400 font-bold animate-pulse">{getChatTypingIndicator(chat)}</span>
                           ) : chat.lastMessage ? (
@@ -1670,100 +1609,94 @@ export const Sidebar: React.FC = () => {
           })()}
         </AnimatePresence>
       </div>
+            </motion.div>
+          )}
 
-      {/* Panel 1: Contacts */}
-          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
-            <SidebarContactsView
-              contactsList={contactsList}
-              globalUsers={globalUsers}
-              onlineUsers={onlineUsers}
-              addContactByUsername={addContactByUsername}
-              createDirectChat={createDirectChat}
-              setSidebarView={setSidebarView}
-              language={language}
-            />
-          </div>
+          {/* Panel 1: Contacts */}
+          {sidebarView === 'contacts' && (
+            <motion.div
+              key="contacts"
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
+            >
+              <SidebarContactsView
+                contactsList={contactsList}
+                globalUsers={globalUsers}
+                onlineUsers={onlineUsers}
+                addContactByUsername={addContactByUsername}
+                createDirectChat={createDirectChat}
+                setSidebarView={setSidebarView}
+                language={language}
+              />
+            </motion.div>
+          )}
 
           {/* Panel 2: Settings */}
-          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
-            <SidebarSettingsView
-              userProfile={userProfile}
-              theme={theme}
-              setTheme={setTheme}
-              language={language}
-            />
-          </div>
+          {sidebarView === 'settings' && (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
+            >
+              <SidebarSettingsView
+                onBack={() => setSidebarView('chats')}
+                userProfile={userProfile}
+                currentUser={currentUser}
+                globalReports={globalReports}
+                globalAuditLogs={globalAuditLogs}
+                resolveReport={resolveReport}
+                terminateOtherSessions={terminateOtherSessions}
+                updateMyProfile={updateMyProfile}
+                uploadAvatar={uploadAvatar}
+                deleteAvatar={deleteAvatar}
+                theme={theme}
+                setTheme={setTheme}
+                language={language}
+              />
+            </motion.div>
+          )}
 
           {/* Panel 3: Profile */}
-          <div className="w-[25%] h-full shrink-0 flex flex-col overflow-y-auto relative border-l border-white/[0.02]">
-            <SidebarProfileView
-              userProfile={userProfile}
-              uploadAvatar={uploadAvatar}
-              deleteAvatar={deleteAvatar}
-              updateMyProfile={updateMyProfile}
-              createDirectChat={createDirectChat}
-              logout={logout}
-              language={language}
-            />
-          </div>
-        </div>
+          {sidebarView === 'profile' && (
+            <motion.div
+              key="profile"
+              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
+            >
+              <SidebarProfileView
+                userProfile={userProfile}
+                uploadAvatar={uploadAvatar}
+                deleteAvatar={deleteAvatar}
+                updateMyProfile={updateMyProfile}
+                createDirectChat={createDirectChat}
+                logout={logout}
+                language={language}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Swipe cue indicator removed per request */}
-      </div>
-
-      {/* Bottom Navigation Dock */}
-      <div className="grid grid-cols-4 border-t border-white/5 bg-[#0a0a0d]/65 backdrop-blur-md text-slate-450 text-[10px] select-none shrink-0 relative md:hidden" style={{ height: '56px' }}>
-        {(() => {
-          const totalUnreads = chats.reduce((acc, chat) => {
+        {/* Bottom Navigation Dock */}
+        <GlassDock 
+          activeTab={sidebarView}
+          setActiveTab={setSidebarView}
+          language={language}
+          unreadCount={chats.reduce((acc, chat) => {
             const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
             if (isArchived) return acc;
             const count = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
             return acc + count;
-          }, 0);
-
-          return [
-            { id: 'chats', label: language === 'ru' ? 'Чаты' : 'Chats', icon: MessageSquare },
-            { id: 'contacts', label: language === 'ru' ? 'Контакты' : 'Contacts', icon: Users },
-            { id: 'settings', label: language === 'ru' ? 'Настройки' : 'Settings', icon: Sliders },
-            { id: 'profile', label: language === 'ru' ? 'Профиль' : 'Profile', icon: User },
-          ].map((btn) => {
-            const Icon = btn.icon;
-            const isActive = sidebarView === btn.id;
-            return (
-              <motion.button
-                key={btn.id}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  setSidebarView(btn.id as any);
-                  setSearchQuery('');
-                }}
-                className={`flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all relative ${isActive ? 'text-cyan-400 font-bold' : 'hover:text-slate-200 text-slate-450'}`}
-              >
-                <div className="relative">
-                  <Icon className={`w-4.5 h-4.5 transition-transform duration-300 ${isActive ? 'scale-110 text-cyan-400 stroke-[2.2px]' : 'scale-100 opacity-65'}`} />
-                  
-                  {/* Total unread badge for Chats button */}
-                  {btn.id === 'chats' && totalUnreads > 0 && (
-                    <span className="absolute -top-1.5 -right-2.5 bg-gradient-to-r from-cyan-500 to-sky-500 text-slate-950 text-[9px] font-black h-4 min-w-[16px] px-1 flex items-center justify-center rounded-full shadow-[0_2px_8px_rgba(6,182,212,0.6)] leading-none">
-                      {totalUnreads}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] tracking-tight">{btn.label}</span>
-
-                {/* Animated active navigation tab underline/glow */}
-                {isActive && (
-                  <motion.div
-                    layoutId="activeNavTab"
-                    className="absolute bottom-0 left-2 right-2 h-[2.5px] bg-gradient-to-r from-cyan-400 to-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.7)] rounded-full"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-              </motion.button>
-            );
-          });
-        })()}
-        </div>
+          }, 0)}
+        />
       </div>
 
       {/* Creation Modal */}
