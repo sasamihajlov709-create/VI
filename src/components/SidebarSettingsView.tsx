@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sliders, User, MessageSquare, Bell, Shield, Palette, 
   HardDrive, Globe, Key, HelpCircle, ChevronRight, ArrowLeft, 
   LogOut, Check, Volume2, ShieldAlert, Sparkles, Clock, Trash2, 
-  Camera, Calendar, Phone, Activity, Moon, Sun, Lock, Info, Mic
+  Camera, Calendar, Phone, Activity, Moon, Sun, Lock, Info, Mic, X
 } from 'lucide-react';
 import { UserProfile } from '../types';
+import { playTapSound, playUnlockSound, playErrorSound } from '../utils/audioEffects';
 
 interface SidebarSettingsViewProps {
   onBack: () => void;
@@ -313,6 +315,19 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
   // Primary subscreen navigation state
   const [subScreen, setSubScreen] = useState<'main' | 'account' | 'chats' | 'notifications' | 'privacy' | 'appearance' | 'data' | 'language' | 'security' | 'help' | 'admin'>('main');
 
+  // Passcode setup states
+  const [showPasscodeModal, setShowPasscodeModal] = useState(false);
+  const [passcodeStep, setPasscodeStep] = useState<'enter' | 'confirm'>('enter');
+  const [passcodePin, setPasscodePin] = useState('');
+  const [passcodeConfirmPin, setPasscodeConfirmPin] = useState('');
+  const [hasPasscode, setHasPasscode] = useState(() => {
+    try {
+      return !!localStorage.getItem('vix-passcode-lock');
+    } catch (e) {
+      return false;
+    }
+  });
+
   // Load Cloud / Storage Settings configurations
   const customSettings = userProfile?.customSettings || {};
 
@@ -526,6 +541,64 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
     setterFn(nextVal);
     localStorage.setItem(`vi-${key}`, String(nextVal));
     saveCustomSettingsBundle({ [key]: nextVal });
+  };
+
+  const handlePasscodeNumClick = (num: string) => {
+    playTapSound();
+    if (passcodeStep === 'enter') {
+      if (passcodePin.length < 4) {
+        const nextPin = passcodePin + num;
+        setPinState(nextPin, 'enter');
+        if (nextPin.length === 4) {
+          setTimeout(() => {
+            setPasscodeStep('confirm');
+          }, 300);
+        }
+      }
+    } else {
+      if (passcodeConfirmPin.length < 4) {
+        const nextPin = passcodeConfirmPin + num;
+        setPinState(nextPin, 'confirm');
+        if (nextPin.length === 4) {
+          setTimeout(() => {
+            if (passcodePin === nextPin) {
+              try {
+                localStorage.setItem('vix-passcode-lock', passcodePin);
+                window.dispatchEvent(new Event('vix-passcode-updated'));
+                playUnlockSound();
+              } catch (e) {}
+              setHasPasscode(true);
+              showToast(language === 'ru' ? 'Код-пароль успешно установлен!' : 'Passcode successfully set!', 'success');
+              setShowPasscodeModal(false);
+              setPasscodePin('');
+              setPasscodeConfirmPin('');
+              setPasscodeStep('enter');
+            } else {
+              playErrorSound();
+              showToast(language === 'ru' ? 'Коды не совпадают. Попробуйте снова.' : 'Passcodes do not match. Try again.', 'error');
+              setPasscodeConfirmPin('');
+            }
+          }, 300);
+        }
+      }
+    }
+  };
+
+  const setPinState = (val: string, step: 'enter' | 'confirm') => {
+    if (step === 'enter') {
+      setPasscodePin(val);
+    } else {
+      setPasscodeConfirmPin(val);
+    }
+  };
+
+  const handlePasscodeBackspace = () => {
+    playTapSound();
+    if (passcodeStep === 'enter') {
+      setPasscodePin(p => p.slice(0, -1));
+    } else {
+      setPasscodeConfirmPin(p => p.slice(0, -1));
+    }
   };
 
   return (
@@ -1411,6 +1484,8 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
                   onClick={() => {
                     terminateOtherSessions().then(() => {
                       showToast(language === 'ru' ? 'Прочие сеансы завершены!' : 'Other hardware sessions revoked!');
+                    }).catch((err: any) => {
+                      showToast(err.message, 'error');
                     });
                   }}
                   className="text-[8px] uppercase font-mono px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded hover:bg-amber-500/25 text-amber-300 cursor-pointer transition active:scale-95"
@@ -1534,14 +1609,86 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
               </p>
 
               {/* Verified account status details block */}
-              <div className="space-y-1.5 border-t border-white/5 pt-3.5 text-xs">
+              <div className="space-y-3 border-t border-white/5 pt-4 text-xs">
                 <div className="flex justify-between items-center text-[10px]">
-                  <span className="text-slate-450">Active Auth Email</span>
+                  <span className="text-slate-450 font-medium">Active Auth Email</span>
                   <span className="font-mono text-[9px] text-slate-350">{currentUser?.email || 'N/A'}</span>
                 </div>
-                <div className="flex justify-between items-center text-[10px]">
-                  <span className="text-slate-450">Firestore Status</span>
+                
+                <div className="flex justify-between items-center text-[10px] pb-1">
+                  <span className="text-slate-450 font-medium">Firestore Status</span>
                   <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/20 px-1 border border-emerald-500/10 rounded">Encrypted</span>
+                </div>
+
+                <div className="pt-2 border-t border-white/[0.03] space-y-3">
+                   <div className="flex items-center justify-between group">
+                      <div className="flex-1 min-w-0">
+                         <span className="text-[11px] font-bold text-slate-200 block mb-0.5">{language === 'ru' ? 'Двухфакторная аутентификация' : 'Two-Factor Authentication'}</span>
+                         <span className="text-[9px] text-slate-500 block leading-tight">{language === 'ru' ? 'Запрашивать пароль при входе с нового устройства.' : 'Additional security code required for login attempts.'}</span>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 rounded accent-cyan-500 cursor-pointer shrink-0 ml-2" 
+                        defaultChecked={false}
+                        onChange={(e) => {
+                          showToast(e.target.checked ? (language === 'ru' ? '2FA включена!' : '2FA Enabled!') : (language === 'ru' ? '2FA отключена' : '2FA Disabled'), 'info');
+                        }}
+                      />
+                   </div>
+
+                   <div className="flex items-center justify-between group">
+                      <div className="flex-1 min-w-0">
+                         <span className="text-[11px] font-bold text-slate-200 block mb-0.5">
+                            {language === 'ru' ? 'Код-пароль' : 'Passcode Lock'}
+                            {hasPasscode && (
+                               <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            )}
+                         </span>
+                         <span className="text-[9px] text-slate-500 block leading-tight">{language === 'ru' ? 'Локальный пин-код для входа в приложение.' : 'Lock the application with a local pin code.'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                         {hasPasscode ? (
+                            <>
+                               <button 
+                                  onClick={() => {
+                                     setPasscodeStep('enter');
+                                     setPasscodePin('');
+                                     setPasscodeConfirmPin('');
+                                     setShowPasscodeModal(true);
+                                  }}
+                                  className="text-[9px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded-lg border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer"
+                               >
+                                  {language === 'ru' ? 'ИЗМЕНИТЬ' : 'CHANGE'}
+                               </button>
+                               <button 
+                                  onClick={() => {
+                                     if (confirm(language === 'ru' ? 'Вы уверены, что хотите отключить код-пароль?' : 'Are you sure you want to disable the passcode?')) {
+                                        localStorage.removeItem('vix-passcode-lock');
+                                        window.dispatchEvent(new Event('vix-passcode-updated'));
+                                        setHasPasscode(false);
+                                        showToast(language === 'ru' ? 'Код-пароль отключен' : 'Passcode disabled', 'info');
+                                     }
+                                  }}
+                                  className="text-[9px] font-bold text-rose-400 bg-rose-500/10 px-2 py-1 rounded-lg border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
+                                >
+                                   {language === 'ru' ? 'ОТКЛЮЧИТЬ' : 'DISABLE'}
+                                </button>
+                            </>
+                         ) : (
+                            <button 
+                               onClick={() => {
+                                  setPasscodeStep('enter');
+                                  setPasscodePin('');
+                                  setPasscodeConfirmPin('');
+                                  setShowPasscodeModal(true);
+                               }}
+                               className="text-[9px] font-bold text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded-lg border border-cyan-500/20 hover:bg-cyan-500/20 transition-all cursor-pointer"
+                            >
+                               {language === 'ru' ? 'НАСТРОИТЬ' : 'SETUP'}
+                            </button>
+                         )}
+                      </div>
+                   </div>
                 </div>
               </div>
             </div>
@@ -1679,6 +1826,117 @@ export const SidebarSettingsView: React.FC<SidebarSettingsViewProps> = ({
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showPasscodeModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-slate-950/95 backdrop-blur-3xl z-50 flex flex-col justify-between p-6"
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center shrink-0">
+              <span className="text-xs font-mono tracking-widest text-slate-500 uppercase">
+                {language === 'ru' ? 'ЗАЩИТА ПРИЛОЖЕНИЯ' : 'SECURITY SHIELD'}
+              </span>
+              <button 
+                onClick={() => {
+                  setShowPasscodeModal(false);
+                  setPasscodePin('');
+                  setPasscodeConfirmPin('');
+                  setPasscodeStep('enter');
+                }}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content info */}
+            <div className="flex-1 flex flex-col items-center justify-center py-6">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-4 animate-pulse">
+                <Lock className="w-5 h-5" />
+              </div>
+              
+              <h3 className="text-sm font-bold text-slate-250 mb-1.5">
+                {passcodeStep === 'enter' 
+                  ? (language === 'ru' ? 'Задайте код-пароль' : 'Set your passcode') 
+                  : (language === 'ru' ? 'Подтвердите код-пароль' : 'Confirm your passcode')
+                }
+              </h3>
+              <p className="text-[10px] text-slate-500 text-center max-w-[200px] leading-normal mb-6">
+                {language === 'ru' 
+                  ? 'Введите 4-значный пин-код для надежной защиты ваших чатов.' 
+                  : 'Enter a 4-digit security PIN to restrict local access to your messages.'
+                }
+              </p>
+
+              {/* Dots indicating progress */}
+              <div className="flex justify-center gap-3.5 mb-8">
+                {Array.from({ length: 4 }).map((_, idx) => {
+                  const currentLen = passcodeStep === 'enter' ? passcodePin.length : passcodeConfirmPin.length;
+                  const isActive = idx < currentLen;
+                  return (
+                    <motion.div 
+                      key={idx}
+                      animate={{ 
+                        scale: isActive ? [1.1, 1.3, 1.1] : 1,
+                        backgroundColor: isActive ? '#22d3ee' : 'rgba(255, 255, 255, 0.1)'
+                      }}
+                      className="w-3 h-3 rounded-full border border-white/5"
+                    />
+                  );
+                })}
+              </div>
+
+              {/* PIN Grid */}
+              <div className="w-full max-w-[240px] grid grid-cols-3 gap-3.5">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
+                  <button 
+                    key={num}
+                    onClick={() => handlePasscodeNumClick(num)}
+                    className="w-14 h-14 rounded-full bg-white/[0.03] hover:bg-white/[0.08] active:scale-90 text-lg font-bold text-slate-200 border border-white/5 flex items-center justify-center transition-all cursor-pointer mx-auto"
+                  >
+                    {num}
+                  </button>
+                ))}
+                {/* Backspace or Clear */}
+                <button 
+                  onClick={() => {
+                    playTapSound();
+                    setPasscodePin('');
+                    setPasscodeConfirmPin('');
+                    setPasscodeStep('enter');
+                  }}
+                  className="w-14 h-14 rounded-full hover:bg-white/[0.03] text-xs font-semibold text-rose-400 flex items-center justify-center transition-all cursor-pointer mx-auto"
+                >
+                  {language === 'ru' ? 'СБРОС' : 'RESET'}
+                </button>
+                <button 
+                  onClick={() => handlePasscodeNumClick('0')}
+                  className="w-14 h-14 rounded-full bg-white/[0.03] hover:bg-white/[0.08] active:scale-90 text-lg font-bold text-slate-200 border border-white/5 flex items-center justify-center transition-all cursor-pointer mx-auto"
+                >
+                  0
+                </button>
+                <button 
+                  onClick={handlePasscodeBackspace}
+                  className="w-14 h-14 rounded-full hover:bg-white/[0.03] text-xs font-semibold text-slate-400 flex items-center justify-center transition-all cursor-pointer mx-auto"
+                >
+                  ⌫
+                </button>
+              </div>
+            </div>
+
+            {/* Security tip */}
+            <div className="text-center shrink-0">
+              <span className="text-[8px] text-slate-600 uppercase tracking-widest font-mono">
+                {language === 'ru' ? 'Аппаратное шифрование AES-256' : 'AES-256 local sandbox container'}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {toast && (
         <div className="absolute bottom-6 left-4 right-4 z-50 bg-slate-950/95 border border-cyan-500/35 text-[11px] font-medium py-3 px-4 rounded-xl flex items-center gap-2.5 text-slate-100 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">

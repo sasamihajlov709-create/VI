@@ -1,0 +1,33 @@
+1690:        <motion.div
+1702:              <motion.div 
+1821:                      <motion.div
+2017:          <motion.div
+2044:          <motion.div 
+2054:              <motion.div 
+2060:                <motion.div 
+2072:                <motion.div 
+2080:                <motion.div 
+2150:                <motion.div 
+2486:                                  <motion.div 
+2576:                        <motion.div 
+2679:          <motion.div
+2707:          <motion.div 
+2834:          <motion.div 
+2887:          <motion.div
+3025:                <motion.div
+3109:                <motion.div 
+3138:                    <motion.div 
+3144:                      <motion.div 
+3189:                    <motion.div 
+3258:                    <motion.div key="send" initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: 45 }}>
+3262:                    <motion.div key={recordingMode} initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+3325:          <motion.div 
+3332:            <motion.div 
+3434:          <motion.div 
+3477:          <motion.div 
+3484:            <motion.div 
+3635:            <motion.div
+3642:            <motion.div
+3742:          <motion.div
+3769:          <motion.div 
+3776:            <motion.div 

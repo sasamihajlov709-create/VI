@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -58,6 +58,7 @@ import { SidebarContactsView } from './SidebarContactsView';
 import { SidebarProfileView } from './SidebarProfileView';
 import { SidebarSettingsView } from './SidebarSettingsView';
 import { GlassDock } from './GlassDock';
+import { playLockSound, playTapSound } from '../utils/audioEffects';
 
 export const Sidebar: React.FC = () => {
   const { 
@@ -117,6 +118,27 @@ export const Sidebar: React.FC = () => {
   const [showCreateChat, setShowCreateChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showFolderModal, setShowFolderModal] = useState(false);
+  
+  // Passcode lock presence state
+  const [sidebarHasPasscode, setSidebarHasPasscode] = useState(() => {
+    try {
+      return !!localStorage.getItem('vix-passcode-lock');
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setSidebarHasPasscode(!!localStorage.getItem('vix-passcode-lock'));
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('vix-passcode-updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('vix-passcode-updated', handleStorageChange);
+    };
+  }, []);
   
   // Custom non-blocking visual Toast Notifications
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -556,6 +578,7 @@ export const Sidebar: React.FC = () => {
     }
 
     if (targetIdx !== idx) {
+      playTapSound();
       setSidebarView(viewsOrder[targetIdx]);
       setSearchQuery('');
       if ('vibrate' in navigator) navigator.vibrate(10);
@@ -647,6 +670,7 @@ export const Sidebar: React.FC = () => {
     }
 
     if (targetIdx !== idx) {
+      playTapSound();
       setSidebarView(viewsOrder[targetIdx]);
       setSearchQuery('');
     }
@@ -767,7 +791,7 @@ export const Sidebar: React.FC = () => {
   const listContainerRef = useRef<HTMLDivElement>(null);
   const { virtualItems, totalHeight } = useVirtual({
     itemCount: filteredChats.length,
-    itemHeight: 72,
+    itemHeight: 64,
     containerRef: listContainerRef,
     buffer: 5,
   });
@@ -810,6 +834,15 @@ export const Sidebar: React.FC = () => {
   const viewsOrder: ('chats' | 'contacts' | 'settings' | 'profile')[] = ['chats', 'contacts', 'settings', 'profile'];
   const activeIndex = viewsOrder.indexOf(sidebarView);
 
+  const unreadCount = useMemo(() => {
+    return chats.reduce((acc, chat) => {
+      const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
+      if (isArchived) return acc;
+      const count = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
+      return acc + count;
+    }, 0);
+  }, [chats, currentUser]);
+
   return (
     <div 
       onTouchStart={handleGestureTouchStart}
@@ -819,11 +852,12 @@ export const Sidebar: React.FC = () => {
       onMouseMove={handleGestureMouseMove}
       onMouseUp={handleGestureMouseUp}
       onMouseLeave={handleGestureMouseUp}
-      className={`w-full md:w-[422px] border-r border-[var(--glass-border)] flex h-full shrink-0 relative overflow-hidden backdrop-blur-3xl bg-[var(--glass-bg)] select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} 
+      className={`w-full md:w-[422px] flex h-full shrink-0 relative overflow-hidden glass-surface-panel border-r border-white/5 select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} 
     >
-      <div className="hidden md:flex w-[82px] h-full bg-[var(--glass-bg-hover)] backdrop-blur-[45px] border-r border-[var(--glass-border)] flex-col items-center py-8 gap-7 shrink-0 no-swipe z-30 relative shadow-[12px_0_40px_rgba(0,0,0,0.3)]">
+      <div className="hidden md:flex w-[82px] h-full bg-white/[0.02] backdrop-blur-[60px] border-r border-white/5 flex-col items-center py-8 gap-7 shrink-0 no-swipe z-30 relative shadow-[12px_0_40px_rgba(0,0,0,0.4)]">
         <div 
           onClick={() => {
+            playTapSound();
             setActiveFolder('all');
             setActiveChat(null);
           }}
@@ -843,6 +877,7 @@ export const Sidebar: React.FC = () => {
         {/* Favorites Quick Access Rail Item */}
         <div 
           onClick={() => {
+            playTapSound();
             const favChat = chats.find(c => c.type === 'direct' && [...new Set(c.members)].length === 1 && c.members[0] === currentUser?.uid);
             if (favChat) {
               setActiveChat(favChat);
@@ -868,7 +903,10 @@ export const Sidebar: React.FC = () => {
         {userProfile?.folders?.map((folder) => (
           <div 
             key={folder.id}
-            onClick={() => setActiveFolder(folder.id)}
+            onClick={() => {
+              playTapSound();
+              setActiveFolder(folder.id);
+            }}
             className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === folder.id ? 'text-white' : 'text-slate-500 hover:text-white'}`}
             title={folder.name}
           >
@@ -887,6 +925,19 @@ export const Sidebar: React.FC = () => {
         ))}
 
         <div className="mt-auto flex flex-col gap-6 pb-4">
+          {sidebarHasPasscode && (
+            <button 
+              onClick={() => {
+                playLockSound();
+                window.dispatchEvent(new Event('vix-lock-app'));
+              }}
+              className="w-13 h-13 rounded-[22px] flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 cursor-pointer transition-all duration-400 shadow-lg active:scale-90"
+              title={language === 'ru' ? 'Заблокировать приложение' : 'Lock Application'}
+            >
+              <Lock className="w-5 h-5 transition-colors" />
+            </button>
+          )}
+
           <button 
             onClick={() => setShowFolderModal(true)}
             className="w-13 h-13 rounded-[22px] flex items-center justify-center bg-white/[0.05] text-slate-500 hover:text-cyan-400 hover:bg-white/[0.1] border border-dashed border-white/20 cursor-pointer transition-all duration-400 hover:border-cyan-500/50"
@@ -926,7 +977,7 @@ export const Sidebar: React.FC = () => {
               className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-hidden"
             >
             {/* Dynamic Header - Optimized for Telegram look */}
-            <div className="pt-2 pb-2 px-3 flex flex-col gap-2 backdrop-blur-3xl shadow-sm transition-all duration-300 relative z-20 border-b border-[var(--glass-border)]" style={{ background: 'var(--glass-header-bg)' }}>
+            <div className="pt-2 pb-2 px-3 flex flex-col gap-2 transition-all duration-300 relative z-20 glass-header" >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center font-bold text-white text-[12px] shadow-sm border border-white/10 overflow-hidden shrink-0">
@@ -1018,6 +1069,7 @@ export const Sidebar: React.FC = () => {
                   <button
                     key={tab.id}
                     onClick={() => {
+                      playTapSound();
                       setActiveFolder(tab.id);
                       if ('vibrate' in navigator) navigator.vibrate(5);
                     }}
@@ -1044,6 +1096,7 @@ export const Sidebar: React.FC = () => {
                     <button
                       key={folder.id}
                       onClick={() => {
+                        playTapSound();
                         setActiveFolder(folder.id);
                         if ('vibrate' in navigator) navigator.vibrate(5);
                       }}
@@ -1178,7 +1231,7 @@ export const Sidebar: React.FC = () => {
                     height: item.size,
                     transform: `translateY(${item.start}px)`,
                   }}
-                  className="px-3 pt-1.5"
+                  className="px-2 pt-0.5 pb-0.5"
                 >
                   <motion.div
                     drag={isSelectionMode ? false : "x"}
@@ -1198,7 +1251,7 @@ export const Sidebar: React.FC = () => {
                         if ('vibrate' in navigator) navigator.vibrate(10);
                       }
                     }}
-                    className={`h-full rounded-[20px] flex items-center gap-4 px-4 cursor-pointer select-none relative transition-all duration-300 group overflow-hidden ${
+                    className={`h-full rounded-[16px] flex items-center gap-3 px-3 cursor-pointer select-none relative transition-all duration-300 group overflow-hidden ${
                       isActive 
                         ? 'bg-white/[0.08] backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.3)] border border-white/[0.15]' 
                         : 'hover:bg-white/[0.05] active:bg-white/[0.08] border border-transparent hover:border-white/[0.05]'
@@ -1235,11 +1288,11 @@ export const Sidebar: React.FC = () => {
                     {/* Chat Thumbnail */}
                     <div className="relative shrink-0 select-none">
                       {isItemFavorites ? (
-                        <div className="w-[46px] h-[46px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
-                          <Bookmark className="w-5.5 h-5.5 text-white fill-white/20" />
+                        <div className="w-[44px] h-[44px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
+                          <Bookmark className="w-5 h-5 text-white fill-white/20" />
                         </div>
                       ) : (
-                        <div className="w-[46px] h-[46px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
+                        <div className="w-[44px] h-[44px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
                           <img 
                             src={chat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(chat.title)}`} 
                             alt={chat.title} 
@@ -1259,13 +1312,13 @@ export const Sidebar: React.FC = () => {
                     {/* Info block */}
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <div className="flex justify-between items-baseline mb-0.5">
-                        <span className="text-[15px] font-semibold truncate text-[var(--glass-text)] tracking-tight pr-2">
+                        <span className="text-[14.5px] font-semibold truncate text-[var(--glass-text)] tracking-tight pr-2">
                           {isItemFavorites ? (language === 'ru' ? 'Избранное' : 'Saved Messages') : chat.title}
                         </span>
                         {chat.lastMessage && (
                           <div className="flex items-center gap-1.5 pl-1 shrink-0">
                             {isPinned && <Pin className="w-3 h-3 text-cyan-400 -rotate-45" />}
-                            <span className="text-[11px] text-[var(--glass-text-muted)] font-medium">
+                            <span className="text-[10.5px] text-[var(--glass-text-muted)] font-medium">
                               {new Date(chat.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
@@ -1273,7 +1326,7 @@ export const Sidebar: React.FC = () => {
                       </div>
                       
                       <div className="flex justify-between items-center">
-                        <p className="text-[13px] text-[var(--glass-text-muted)] truncate pr-2 flex items-center gap-1">
+                        <p className="text-[12.5px] text-[var(--glass-text-muted)] truncate pr-2 flex items-center gap-1">
                           {getChatTypingIndicator(chat) ? (
                             <span className="text-cyan-400 font-bold animate-pulse">{getChatTypingIndicator(chat)}</span>
                           ) : chat.lastMessage ? (
@@ -1690,12 +1743,7 @@ export const Sidebar: React.FC = () => {
           activeTab={sidebarView}
           setActiveTab={setSidebarView}
           language={language}
-          unreadCount={chats.reduce((acc, chat) => {
-            const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
-            if (isArchived) return acc;
-            const count = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
-            return acc + count;
-          }, 0)}
+          unreadCount={unreadCount}
         />
       </div>
 
@@ -1826,7 +1874,7 @@ export const Sidebar: React.FC = () => {
                     <span className="font-black text-white text-[22px] tracking-tight">{language === 'ru' ? 'Папки' : 'Folders'}</span>
                     <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">{language === 'ru' ? 'Управление категориями' : 'Manage categories'}</span>
                   </div>
-                  <button onClick={() => setShowFolderModal(false)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white bg-white/[0.05] rounded-[18px] transition active:scale-90 cursor-pointer border border-white/10">
+                  <button onClick={() => { playTapSound(); setShowFolderModal(false); }} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white bg-white/[0.05] rounded-[18px] transition active:scale-90 cursor-pointer border border-white/10">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -1865,7 +1913,7 @@ export const Sidebar: React.FC = () => {
                             <button
                               type="button"
                               disabled={idx === 0}
-                              onClick={() => handleMoveFolder(idx, 'up')}
+                              onClick={() => { playTapSound(); handleMoveFolder(idx, 'up'); }}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 disabled:opacity-20 cursor-pointer transition"
                             >
                               <ChevronUp className="w-4 h-4" />
@@ -1873,7 +1921,7 @@ export const Sidebar: React.FC = () => {
                             <button
                               type="button"
                               disabled={idx === listLength - 1}
-                              onClick={() => handleMoveFolder(idx, 'down')}
+                              onClick={() => { playTapSound(); handleMoveFolder(idx, 'down'); }}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-white/10 disabled:opacity-20 cursor-pointer transition"
                             >
                               <ChevronDown className="w-4 h-4" />
@@ -1881,6 +1929,7 @@ export const Sidebar: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => {
+                                playTapSound();
                                 setEditingFolderId(f.id);
                                 setNewFolderName(f.name);
                                 setNewFolderChats(f.chatIds || []);
@@ -1891,7 +1940,7 @@ export const Sidebar: React.FC = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => deleteFolder(f.id)}
+                              onClick={() => { playTapSound(); deleteFolder(f.id); }}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/10 cursor-pointer transition"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1911,14 +1960,14 @@ export const Sidebar: React.FC = () => {
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => handleCreatePreset('work')}
+                        onClick={() => { playTapSound(); handleCreatePreset('work'); }}
                         className="flex-1 px-4 py-3 text-xs font-bold bg-white/[0.03] border border-white/5 rounded-2xl hover:border-cyan-500/40 hover:bg-cyan-500/5 text-slate-300 hover:text-cyan-400 cursor-pointer transition-all active:scale-95"
                       >
                         💼 {language === 'ru' ? 'Работа' : 'Work/Groups'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleCreatePreset('channels')}
+                        onClick={() => { playTapSound(); handleCreatePreset('channels'); }}
                         className="flex-1 px-4 py-3 text-xs font-bold bg-white/[0.03] border border-white/5 rounded-2xl hover:border-cyan-500/40 hover:bg-cyan-500/5 text-slate-300 hover:text-cyan-400 cursor-pointer transition-all active:scale-95"
                       >
                         📢 {language === 'ru' ? 'Каналы' : 'Channels'}
@@ -1931,6 +1980,7 @@ export const Sidebar: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
+                      playTapSound();
                       setEditingFolderId('new');
                       setNewFolderName('');
                       setNewFolderChats([]);
@@ -1941,7 +1991,7 @@ export const Sidebar: React.FC = () => {
                   </button>
                   <button 
                     type="button" 
-                    onClick={() => setShowFolderModal(false)}
+                    onClick={() => { playTapSound(); setShowFolderModal(false); }}
                     className="flex-1 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm text-slate-300 font-bold cursor-pointer transition-all active:scale-95"
                   >
                     {language === 'ru' ? 'Закрыть' : 'Close'}

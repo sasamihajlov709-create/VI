@@ -112,13 +112,13 @@ export function useVoiceRecorder(
       let options: MediaRecorderOptions = {};
       if (typeof MediaRecorder !== 'undefined') {
         if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 128000 };
+          options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 32000 };
         } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-          options = { mimeType: 'audio/ogg;codecs=opus', audioBitsPerSecond: 128000 };
+          options = { mimeType: 'audio/ogg;codecs=opus', audioBitsPerSecond: 32000 };
         } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options = { mimeType: 'audio/mp4', audioBitsPerSecond: 128000 };
+          options = { mimeType: 'audio/mp4', audioBitsPerSecond: 32000 };
         } else {
-          options = { audioBitsPerSecond: 128000 };
+          options = { audioBitsPerSecond: 32000 };
         }
       }
       

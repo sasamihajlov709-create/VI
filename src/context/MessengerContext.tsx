@@ -1364,15 +1364,29 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const deleteChat = async (chatId: string) => {
     if (!currentUser) return;
     const targetChat = chats.find(c => c.id === chatId);
-    if (targetChat && targetChat.type === 'direct' && targetChat.members.length === 1 && targetChat.members[0] === currentUser.uid) {
+    if (!targetChat) return;
+    
+    if (targetChat.type === 'direct' && targetChat.members.length === 1 && targetChat.members[0] === currentUser.uid) {
       console.warn("Attempt to delete Favorites/Saved Messages chat blocked.");
       return;
     }
-    await updateDoc(doc(db, 'chats', chatId), {
-      members: arrayRemove(currentUser.uid)
-    });
-    if (activeChat?.id === chatId) {
-      setActiveChatState(null);
+    
+    try {
+      // In a real app we'd delete messages or mark 'deletedFor'. 
+      // For simplicity here, we delete the chat document if user is admin, else we leave.
+      if (targetChat.admins?.includes(currentUser.uid) || targetChat.creatorId === currentUser.uid) {
+        await deleteDoc(doc(db, 'chats', chatId));
+      } else {
+        await updateDoc(doc(db, 'chats', chatId), {
+          members: arrayRemove(currentUser.uid)
+        });
+      }
+      
+      if (activeChat?.id === chatId) {
+        setActiveChatState(null);
+      }
+    } catch (e) {
+      console.error("Failed to delete/leave chat", e);
     }
   };
 
@@ -1942,7 +1956,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           senderId: currentUser.uid,
           senderName: userProfile.displayName,
           senderPhotoURL: userProfile.photoURL || '',
-          text: `Attachment File: ${file.name}`,
+          text: type === 'video' && (file.name === 'video-note.webm' || file.name.includes('video-note')) ? '' : `Attachment File: ${file.name}`,
           type: type,
           fileUrl: base64Url,
           fileName: file.name,
@@ -2007,7 +2021,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             senderId: currentUser.uid,
             senderName: userProfile.displayName,
             senderPhotoURL: userProfile.photoURL || '',
-            text: `Attachment File: ${file.name}`,
+            text: type === 'video' && (file.name === 'video-note.webm' || file.name.includes('video-note')) ? '' : `Attachment File: ${file.name}`,
             type: type,
             fileUrl: url,
             fileName: file.name,

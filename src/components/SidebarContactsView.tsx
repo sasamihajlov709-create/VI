@@ -147,26 +147,52 @@ export const SidebarContactsView: React.FC<SidebarContactsViewProps> = ({
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="py-14 text-center space-y-3 px-4"
+            className="py-14 text-center space-y-8 px-4"
           >
-            <div className="w-12 h-12 bg-gradient-to-br from-white/[0.02] to-white/[0.05] rounded-full border border-white/5 flex items-center justify-center mx-auto text-slate-500 shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-8 h-8 bg-cyan-500/5 rounded-full blur-lg pointer-events-none" />
-              <UserPlus className="w-5 h-5 text-slate-400" />
+            <div className="space-y-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-white/[0.02] to-white/[0.05] rounded-full border border-white/5 flex items-center justify-center mx-auto text-slate-500 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-8 h-8 bg-cyan-500/5 rounded-full blur-lg pointer-events-none" />
+                <UserPlus className="w-5 h-5 text-slate-400" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-300">
+                  {contactsList.length === 0 
+                    ? (language === 'ru' ? 'Контакты не обнаружены' : 'No connections here yet')
+                    : (language === 'ru' ? 'Ничего не найдено' : 'No contacts matched')}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-1.5 max-w-[200px] mx-auto leading-relaxed">
+                  {contactsList.length === 0 
+                    ? (language === 'ru' 
+                      ? 'Введите @username вашего коллеги выше для незамедлительного старта диалога.' 
+                      : 'Specify @username of your team member above to start chat securely.')
+                    : (language === 'ru' ? 'Попробуйте изменить запрос.' : 'Try adjusting your search query.')}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-bold text-slate-300">
-                {contactsList.length === 0 
-                  ? (language === 'ru' ? 'Контакты не обнаружены' : 'No connections here yet')
-                  : (language === 'ru' ? 'Ничего не найдено' : 'No contacts matched')}
-              </p>
-              <p className="text-[10px] text-slate-500 mt-1.5 max-w-[200px] mx-auto leading-relaxed">
-                {contactsList.length === 0 
-                  ? (language === 'ru' 
-                    ? 'Введите @username вашего коллеги выше для незамедлительного старта диалога.' 
-                    : 'Specify @username of your team member above to start chat securely.')
-                  : (language === 'ru' ? 'Попробуйте изменить запрос.' : 'Try adjusting your search query.')}
-              </p>
-            </div>
+
+            {contactsList.length === 0 && globalUsers.length > contactsList.length && (
+              <div className="text-left space-y-3 px-2">
+                <p className="text-[10px] uppercase font-bold text-slate-600 tracking-wider pl-1">
+                  {language === 'ru' ? 'Рекомендуемые' : 'Suggested for you'}
+                </p>
+                <div className="space-y-1.5">
+                  {globalUsers.filter(u => !contactsList.find(c => c.uid === u.uid)).slice(0, 3).map(user => (
+                    <div key={user.uid} className="flex items-center justify-between p-2 bg-white/[0.02] rounded-xl border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <img src={user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName)}`} className="w-7 h-7 rounded-full" />
+                        <span className="text-xs font-bold text-slate-300">{user.displayName}</span>
+                      </div>
+                      <button 
+                        onClick={async () => { await addContactByUsername(user.username); }}
+                        className="text-[10px] bg-white/5 hover:bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded-md transition"
+                      >
+                        {language === 'ru' ? 'Добавить' : 'Add'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         ) : (
           <div className="space-y-1">

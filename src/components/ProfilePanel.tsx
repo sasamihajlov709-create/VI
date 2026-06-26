@@ -187,9 +187,14 @@ export const ProfilePanel: React.FC = () => {
     
     // Calculate simulated diagnostic latency (Firestore baseline ping)
     const t0 = performance.now();
-    getDocs(query(collection(db, 'users'), limit(1))).then(() => {
-      setDbLatency(Math.round(performance.now() - t0));
-    });
+    getDocs(query(collection(db, 'users'), limit(1)))
+      .then(() => {
+        setDbLatency(Math.round(performance.now() - t0));
+      })
+      .catch(() => {
+        // Suppress latency check failures (common if user lacks list permissions)
+        setDbLatency(null);
+      });
 
   }, [activeChat?.id, activeChat?.members?.length]);
 

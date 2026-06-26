@@ -12,6 +12,7 @@ import { ChatWindow } from './components/ChatWindow';
 import { ProfilePanel } from './components/ProfilePanel';
 import { CallScreen } from './components/CallScreen';
 import { Onboarding } from './components/Onboarding';
+import { LockScreen } from './components/LockScreen';
 import { 
   Lock, 
   Mail, 
@@ -41,6 +42,40 @@ const MessengerContent: React.FC = () => {
   } = useMessenger();
 
   const { t, language, setLanguage } = useLanguage();
+
+  // App lock states
+  const [isAppLocked, setIsAppLocked] = useState(() => {
+    try {
+      return !!localStorage.getItem('vix-passcode-lock');
+    } catch (e) {
+      return false;
+    }
+  });
+
+  React.useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        try {
+          const hasPin = !!localStorage.getItem('vix-passcode-lock');
+          if (hasPin) {
+            setIsAppLocked(true);
+          }
+        } catch (e) {}
+      }
+    };
+    
+    const handleCustomLock = () => {
+      setIsAppLocked(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('vix-lock-app', handleCustomLock);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('vix-lock-app', handleCustomLock);
+    };
+  }, []);
 
   // Auth local inputs
   const [isSignUp, setIsSignUp] = useState(false);
@@ -153,6 +188,16 @@ const MessengerContent: React.FC = () => {
       return <Onboarding />;
     }
 
+    if (isAppLocked) {
+      return (
+        <LockScreen 
+          onUnlock={() => setIsAppLocked(false)} 
+          language={language}
+          theme={theme}
+        />
+      );
+    }
+
     return (
       <div 
         className={`flex w-screen text-[var(--glass-text)] overflow-hidden relative font-sans ${theme}`}
@@ -160,8 +205,8 @@ const MessengerContent: React.FC = () => {
       >
         {/* Background Ambient Glows (VisionOS Depth) */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 opacity-40">
-           <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] ambient-aurora-glow-1 blur-[120px]" />
-           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] ambient-aurora-glow-2 blur-[120px]" />
+           <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] blur-[120px] aurora-glow-1 aurora-glow-${theme}`} />
+           <div className={`absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] blur-[120px] aurora-glow-2 aurora-glow-${theme}`} />
         </div>
 
         {/* Offline connection status bar */}
