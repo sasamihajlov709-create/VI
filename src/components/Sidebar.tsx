@@ -98,7 +98,9 @@ export const Sidebar: React.FC = () => {
     terminateOtherSessions,
     resolveReport,
     globalReports,
-    globalAuditLogs
+    globalAuditLogs,
+    sidebarView,
+    setSidebarView
   } = useMessenger();
 
   const { t, language, setLanguage } = useLanguage();
@@ -273,8 +275,6 @@ export const Sidebar: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Multi-view navigation and helper state variables
-  const [sidebarView, setSidebarView] = useState<'chats' | 'contacts' | 'settings' | 'profile'>('chats');
   const [contactUsername, setContactUsername] = useState('');
   const [contactStatusMsg, setContactStatusMsg] = useState<{ type: 'error' | 'success', msg: string } | null>(null);
 
@@ -791,7 +791,7 @@ export const Sidebar: React.FC = () => {
   const listContainerRef = useRef<HTMLDivElement>(null);
   const { virtualItems, totalHeight } = useVirtual({
     itemCount: filteredChats.length,
-    itemHeight: 64,
+    itemHeight: 60,
     containerRef: listContainerRef,
     buffer: 5,
   });
@@ -834,15 +834,6 @@ export const Sidebar: React.FC = () => {
   const viewsOrder: ('chats' | 'contacts' | 'settings' | 'profile')[] = ['chats', 'contacts', 'settings', 'profile'];
   const activeIndex = viewsOrder.indexOf(sidebarView);
 
-  const unreadCount = useMemo(() => {
-    return chats.reduce((acc, chat) => {
-      const isArchived = currentUser && chat.archivedIds?.includes(currentUser.uid);
-      if (isArchived) return acc;
-      const count = currentUser && chat.unreadCounts ? chat.unreadCounts[currentUser.uid] || 0 : 0;
-      return acc + count;
-    }, 0);
-  }, [chats, currentUser]);
-
   return (
     <div 
       onTouchStart={handleGestureTouchStart}
@@ -854,24 +845,24 @@ export const Sidebar: React.FC = () => {
       onMouseLeave={handleGestureMouseUp}
       className={`w-full md:w-[422px] flex h-full shrink-0 relative overflow-hidden glass-surface-panel border-r border-white/5 select-none ${activeChat ? 'hidden md:flex' : 'flex'}`} 
     >
-      <div className="hidden md:flex w-[82px] h-full bg-white/[0.02] backdrop-blur-[60px] border-r border-white/5 flex-col items-center py-8 gap-7 shrink-0 no-swipe z-30 relative shadow-[12px_0_40px_rgba(0,0,0,0.4)]">
+      <div className="hidden md:flex w-[72px] h-full bg-white/[0.02] backdrop-blur-[60px] border-r border-white/5 flex-col items-center py-6 gap-6 shrink-0 no-swipe z-30 relative shadow-[12px_0_40px_rgba(0,0,0,0.4)]">
         <div 
           onClick={() => {
             playTapSound();
             setActiveFolder('all');
             setActiveChat(null);
           }}
-          className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === 'all' && !activeChat ? 'text-white' : 'text-slate-500 hover:text-slate-200'}`}
+          className={`w-11 h-11 rounded-[20px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === 'all' && !activeChat ? 'text-white' : 'text-slate-500 hover:text-slate-200'}`}
           title={language === 'ru' ? 'Все чаты' : 'All Chats'}
         >
           {activeFolder === 'all' && !activeChat && (
             <motion.div 
               layoutId="railActiveIndicator"
-              className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+              className="absolute inset-0 bg-white/12 rounded-[20px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
               transition={{ type: 'spring', stiffness: 500, damping: 35 }}
             />
           )}
-          <div className="font-black text-[12px] uppercase tracking-tighter relative z-10">All</div>
+          <div className="font-black text-[11px] uppercase tracking-tighter relative z-10">All</div>
         </div>
 
         {/* Favorites Quick Access Rail Item */}
@@ -887,17 +878,17 @@ export const Sidebar: React.FC = () => {
               setActiveFolder('all');
             }
           }}
-          className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 ? 'text-white' : 'text-slate-500 hover:text-cyan-400'}`}
+          className={`w-11 h-11 rounded-[20px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 ? 'text-white' : 'text-slate-500 hover:text-cyan-400'}`}
           title={language === 'ru' ? 'Избранное' : 'Saved Messages'}
         >
           {activeChat?.type === 'direct' && [...new Set(activeChat.members)].length === 1 && (
             <motion.div 
               layoutId="railActiveIndicator"
-              className="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-indigo-600 rounded-[22px] shadow-[0_4px_20px_rgba(34,211,238,0.4)] border border-white/20"
+              className="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-indigo-600 rounded-[20px] shadow-[0_4px_20px_rgba(34,211,238,0.4)] border border-white/20"
               transition={{ type: 'spring', stiffness: 500, damping: 35 }}
             />
           )}
-          <Bookmark className="w-6 h-6 relative z-10" />
+          <Bookmark className="w-5 h-5 relative z-10" />
         </div>
 
         {userProfile?.folders?.map((folder) => (
@@ -907,58 +898,58 @@ export const Sidebar: React.FC = () => {
               playTapSound();
               setActiveFolder(folder.id);
             }}
-            className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === folder.id ? 'text-white' : 'text-slate-500 hover:text-white'}`}
+            className={`w-11 h-11 rounded-[20px] flex items-center justify-center cursor-pointer transition-all duration-400 relative group ${activeFolder === folder.id ? 'text-white' : 'text-slate-500 hover:text-white'}`}
             title={folder.name}
           >
             {activeFolder === folder.id && (
               <motion.div 
                 layoutId="railActiveIndicator"
-                className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+                className="absolute inset-0 bg-white/12 rounded-[20px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
                 transition={{ type: 'spring', stiffness: 500, damping: 35 }}
               />
             )}
-            <div className="relative z-10 scale-115">{getFolderIcon(folder.icon)}</div>
+            <div className="relative z-10 scale-105">{getFolderIcon(folder.icon)}</div>
             <div className="absolute left-20 px-3 py-1.5 vision-floating-header text-[11px] font-bold text-white rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-[100] border border-white/20 font-sans shadow-2xl transition-all translate-x-[-10px] group-hover:translate-x-0">
               {folder.name}
             </div>
           </div>
         ))}
 
-        <div className="mt-auto flex flex-col gap-6 pb-4">
+        <div className="mt-auto flex flex-col gap-5 pb-4">
           {sidebarHasPasscode && (
             <button 
               onClick={() => {
                 playLockSound();
                 window.dispatchEvent(new Event('vix-lock-app'));
               }}
-              className="w-13 h-13 rounded-[22px] flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 cursor-pointer transition-all duration-400 shadow-lg active:scale-90"
+              className="w-11 h-11 rounded-[20px] flex items-center justify-center bg-white/[0.05] hover:bg-white/[0.1] text-slate-400 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 cursor-pointer transition-all duration-400 shadow-lg active:scale-90"
               title={language === 'ru' ? 'Заблокировать приложение' : 'Lock Application'}
             >
-              <Lock className="w-5 h-5 transition-colors" />
+              <Lock className="w-4 h-4 transition-colors" />
             </button>
           )}
 
           <button 
             onClick={() => setShowFolderModal(true)}
-            className="w-13 h-13 rounded-[22px] flex items-center justify-center bg-white/[0.05] text-slate-500 hover:text-cyan-400 hover:bg-white/[0.1] border border-dashed border-white/20 cursor-pointer transition-all duration-400 hover:border-cyan-500/50"
+            className="w-11 h-11 rounded-[20px] flex items-center justify-center bg-white/[0.05] text-slate-500 hover:text-cyan-400 hover:bg-white/[0.1] border border-dashed border-white/20 cursor-pointer transition-all duration-400 hover:border-cyan-500/50"
             title={language === 'ru' ? 'Управление папками' : 'Manage Folders'}
           >
-            <Plus className="w-7 h-7" />
+            <Plus className="w-6 h-6" />
           </button>
 
           <div 
             onClick={() => setSidebarView('settings')}
-            className={`w-13 h-13 rounded-[22px] flex items-center justify-center cursor-pointer transition-all duration-400 relative ${sidebarView === 'settings' ? 'text-white' : 'text-slate-500 hover:text-white'}`}
+            className={`w-11 h-11 rounded-[20px] flex items-center justify-center cursor-pointer transition-all duration-400 relative ${sidebarView === 'settings' ? 'text-white' : 'text-slate-500 hover:text-white'}`}
             title={language === 'ru' ? 'Настройки' : 'Settings'}
           >
             {sidebarView === 'settings' && (
               <motion.div 
                 layoutId="railActiveIndicator"
-                className="absolute inset-0 bg-white/12 rounded-[22px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
+                className="absolute inset-0 bg-white/12 rounded-[20px] border border-white/20 shadow-[0_4px_15px_rgba(0,0,0,0.3)]"
                 transition={{ type: 'spring', stiffness: 500, damping: 35 }}
               />
             )}
-            <Settings className="w-6 h-6 relative z-10" />
+            <Settings className="w-5 h-5 relative z-10" />
           </div>
         </div>
       </div>
@@ -966,14 +957,14 @@ export const Sidebar: React.FC = () => {
 
       {/* Scrollable / Swipeable content container wrapper */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
-        <AnimatePresence mode="popLayout" initial={false}>
+        <AnimatePresence mode="wait">
           {sidebarView === 'chats' && (
             <motion.div 
               key="chats"
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0, scale: 0.96, filter: 'blur(8px)', y: 10 }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', y: 0 }}
+              exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)', y: -10 }}
+              transition={{ duration: 0.45, ease: [0.19, 1, 0.22, 1] }}
               className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-hidden"
             >
             {/* Dynamic Header - Optimized for Telegram look */}
@@ -1288,11 +1279,11 @@ export const Sidebar: React.FC = () => {
                     {/* Chat Thumbnail */}
                     <div className="relative shrink-0 select-none">
                       {isItemFavorites ? (
-                        <div className="w-[44px] h-[44px] rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
+                        <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg border border-white/10 shrink-0">
                           <Bookmark className="w-5 h-5 text-white fill-white/20" />
                         </div>
                       ) : (
-                        <div className="w-[44px] h-[44px] rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
+                        <div className="w-11 h-11 rounded-full overflow-hidden border border-white/10 bg-slate-800 shadow-sm">
                           <img 
                             src={chat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(chat.title)}`} 
                             alt={chat.title} 
@@ -1301,7 +1292,7 @@ export const Sidebar: React.FC = () => {
                         </div>
                       )}
                       {chat.type === 'direct' && !isItemFavorites && (
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 border-[var(--glass-bg)] absolute -right-0.5 -bottom-0.5 shadow-sm ${
+                        <div className={`w-3 h-3 rounded-full border-2 border-[var(--glass-bg)] absolute -right-0.5 -bottom-0.5 shadow-sm ${
                           chat.members.find(id => id !== currentUser?.uid) && onlineUsers[chat.members.find(id => id !== currentUser?.uid) || ''] === 'online' 
                             ? 'bg-emerald-500' 
                             : 'bg-slate-600'
@@ -1669,10 +1660,10 @@ export const Sidebar: React.FC = () => {
           {sidebarView === 'contacts' && (
             <motion.div
               key="contacts"
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0, scale: 0.96, filter: 'blur(8px)', y: 10 }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', y: 0 }}
+              exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)', y: -10 }}
+              transition={{ duration: 0.45, ease: [0.19, 1, 0.22, 1] }}
               className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
             >
               <SidebarContactsView
@@ -1691,10 +1682,10 @@ export const Sidebar: React.FC = () => {
           {sidebarView === 'settings' && (
             <motion.div
               key="settings"
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0, scale: 0.96, filter: 'blur(8px)', y: 10 }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', y: 0 }}
+              exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)', y: -10 }}
+              transition={{ duration: 0.45, ease: [0.19, 1, 0.22, 1] }}
               className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
             >
               <SidebarSettingsView
@@ -1719,10 +1710,10 @@ export const Sidebar: React.FC = () => {
           {sidebarView === 'profile' && (
             <motion.div
               key="profile"
-              initial={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0, scale: 0.96, filter: 'blur(8px)', y: 10 }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', y: 0 }}
+              exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)', y: -10 }}
+              transition={{ duration: 0.45, ease: [0.19, 1, 0.22, 1] }}
               className="absolute inset-0 w-full h-full shrink-0 flex flex-col overflow-y-auto relative"
             >
               <SidebarProfileView
@@ -1737,14 +1728,6 @@ export const Sidebar: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Bottom Navigation Dock */}
-        <GlassDock 
-          activeTab={sidebarView}
-          setActiveTab={setSidebarView}
-          language={language}
-          unreadCount={unreadCount}
-        />
       </div>
 
       {/* Creation Modal */}

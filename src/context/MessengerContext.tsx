@@ -71,6 +71,10 @@ interface MessengerContextType {
   globalUsers: UserProfile[];
   onlineUsers: { [uid: string]: 'online' | 'offline' };
   activeFolder: string; // 'all' | folderId
+  sidebarView: 'chats' | 'contacts' | 'settings' | 'profile';
+  setSidebarView: (view: 'chats' | 'contacts' | 'settings' | 'profile') => void;
+  isKeyboardOpen: boolean;
+  setIsKeyboardOpen: (isOpen: boolean) => void;
   searchQuery: string;
   isSidebarOpen: boolean;
   isRightPanelOpen: boolean;
@@ -262,7 +266,9 @@ export function useMessengerUIState() {
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('app-theme') || 'theme-dark-glass');
   const [globalReports, setGlobalReports] = useState<ReportItem[]>([]);
   const [globalAuditLogs, setGlobalAuditLogs] = useState<any[]>([]);
-  return { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs };
+  const [sidebarView, setSidebarView] = useState<'chats' | 'contacts' | 'settings' | 'profile'>('chats');
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState<boolean>(false);
+  return { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs, sidebarView, setSidebarView, isKeyboardOpen, setIsKeyboardOpen };
 }
 
 export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -270,7 +276,7 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const { chats, setChats, messages, setMessages, activeChat, setActiveChatState, activeFolder, setActiveFolder, searchQuery, setSearchQuery } = useMessengerChatState();
   const { stories, setStories, activeCall, setActiveCall, dialerCall, setDialerCall, uploadProgress, setUploadProgress } = useMessengerMediaState();
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
-  const { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs } = useMessengerUIState();
+  const { blockedUsersList, setBlockedUsersList, contactsList, setContactsList, globalUsers, setGlobalUsers, onlineUsers, setOnlineUsers, isSidebarOpen, setIsSidebarOpen, isRightPanelOpen, setIsRightPanelOpen, selectedUserProfile, setSelectedUserProfile, theme, setThemeState, globalReports, setGlobalReports, globalAuditLogs, setGlobalAuditLogs, sidebarView, setSidebarView, isKeyboardOpen, setIsKeyboardOpen } = useMessengerUIState();
 
   const setTheme = async (t: string) => {
     setThemeState(t);
@@ -2706,8 +2712,12 @@ export const MessengerProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       resolveReport,
       writeAuditLog,
       globalReports,
-      globalAuditLogs
-      }), [currentUser, userProfile, isAuthInitialized, chats, messages, activeChat, stories, activeCall, dialerCall, blockedUsersList, contactsList, globalUsers, onlineUsers, activeFolder, searchQuery, isSidebarOpen, isRightPanelOpen, uploadProgress, theme, selectedUserProfile, globalReports, globalAuditLogs, forwardingMessage])}>
+      globalAuditLogs,
+      sidebarView,
+      setSidebarView,
+      isKeyboardOpen,
+      setIsKeyboardOpen
+      }), [currentUser, userProfile, isAuthInitialized, chats, messages, activeChat, stories, activeCall, dialerCall, blockedUsersList, contactsList, globalUsers, onlineUsers, activeFolder, searchQuery, isSidebarOpen, isRightPanelOpen, uploadProgress, theme, selectedUserProfile, globalReports, globalAuditLogs, forwardingMessage, sidebarView, isKeyboardOpen])}>
       {children}
     </MessengerContext.Provider>
   );

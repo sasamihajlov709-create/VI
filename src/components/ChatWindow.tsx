@@ -278,7 +278,6 @@ const CircularVideoNote: React.FC<{ src: string, status?: string, isMe?: boolean
     const handleCanPlay = () => {
       if (playing) {
         video.play().catch(() => {
-          // Fallback if autoplay is blocked
           setPlaying(false);
         });
       }
@@ -316,7 +315,7 @@ const CircularVideoNote: React.FC<{ src: string, status?: string, isMe?: boolean
   return (
     <div 
       onClick={handleVideoClick}
-      className="relative w-56 h-56 sm:w-64 sm:h-64 rounded-full overflow-hidden border-2 border-white/5 bg-black cursor-pointer shadow-2xl my-1 group shrink-0"
+      className="relative w-56 h-56 sm:w-64 sm:h-64 rounded-full overflow-hidden border border-white/10 bg-black cursor-pointer shadow-2xl my-1 group shrink-0"
     >
       <video 
         ref={videoRef}
@@ -329,13 +328,12 @@ const CircularVideoNote: React.FC<{ src: string, status?: string, isMe?: boolean
         className="w-full h-full object-cover rounded-full" 
       />
       
-      {/* Dynamic progress ring circling the video note */}
       <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 100 100">
         <circle 
           cx="50" 
           cy="50" 
           r="49" 
-          stroke="rgba(255, 255, 255, 0.15)"
+          stroke="rgba(255, 255, 255, 0.1)"
           strokeWidth="2" 
           fill="transparent" 
         />
@@ -343,7 +341,7 @@ const CircularVideoNote: React.FC<{ src: string, status?: string, isMe?: boolean
           cx="50" 
           cy="50" 
           r="49" 
-          stroke="#9d7cf6"
+          stroke="var(--glass-accent, #9d7cf6)"
           strokeWidth="2" 
           fill="transparent" 
           strokeDasharray={2 * Math.PI * 49}
@@ -352,49 +350,30 @@ const CircularVideoNote: React.FC<{ src: string, status?: string, isMe?: boolean
         />
       </svg>
 
-      {/* Play/Pause Overlay */}
       <div className={`absolute inset-0 flex items-center justify-center bg-black/20 transition-opacity duration-300 ${playing ? 'opacity-0' : 'opacity-100'}`}>
-        <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
-          <Play className="w-8 h-8 text-white fill-white ml-1" />
+        <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
+          <Play className="w-7 h-7 text-white fill-white ml-1" />
         </div>
       </div>
 
-      {/* Mute toggle button */}
-      <button 
-        onClick={toggleMute}
-        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity z-30"
-      >
-        {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-      </button>
-
-      {/* Timestamp and checks overlay inside the circle at bottom right */}
-      <div className="absolute bottom-4 right-1/4 translate-x-1/2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/30 backdrop-blur-sm text-[10px] text-white/90 z-20">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/40 backdrop-blur-sm text-[10px] text-white/90 z-20 border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity">
         <span>{formatVideoNoteTime(currentTime)}</span>
         <div className="flex items-center">
           {status === 'read' ? (
-            <CheckCheck className="w-3 h-3 text-[#9d7cf6]" />
+            <CheckCheck className="w-3.5 h-3.5 text-[#9d7cf6]" />
           ) : (
-            <Check className="w-3 h-3 text-white/70" />
+            <Check className="w-3.5 h-3.5 text-white/70" />
           )}
         </div>
-      </div>
-
-      {/* Control overlays */}
-      <div className="absolute inset-0 bg-transparent group-hover:bg-black/10 flex items-center justify-center transition-all duration-300">
-        {!playing && (
-          <div className="p-3 rounded-full bg-black/60 text-white backdrop-blur-sm shadow">
-            <Play className="w-6 h-6 fill-white" />
-          </div>
-        )}
       </div>
 
       <button 
         type="button"
         onClick={toggleMute}
-        className="absolute bottom-12 right-6 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white border border-white/10 text-xs shadow-md transition-all active:scale-90 z-20 opacity-0 group-hover:opacity-100"
+        className="absolute top-4 right-4 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white border border-white/10 text-xs shadow-md transition-all active:scale-90 z-30 opacity-0 group-hover:opacity-100"
         title={muted ? "Unmute" : "Mute"}
       >
-        {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-[#9d7cf6]" />}
+        {muted ? <VolumeX className="w-4.5 h-4.5 text-slate-300" /> : <Volume2 className="w-4.5 h-4.5 text-cyan-400" />}
       </button>
     </div>
   );
@@ -594,7 +573,8 @@ export const ChatWindow: React.FC = () => {
     addContactByUsername,
     onlineUsers,
     forwardingMessage,
-    setForwardingMessage
+    setForwardingMessage,
+    isKeyboardOpen
   } = useMessenger();
 
   const { t, language } = useLanguage();
@@ -1859,7 +1839,7 @@ export const ChatWindow: React.FC = () => {
               <motion.div 
                 initial={{ y: -20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                className="w-full h-[56px] bg-[#17212b]/95 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-2 md:px-4 pointer-events-auto shadow-md relative overflow-hidden"
+                className="w-full h-[60px] bg-[#17212b]/95 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-2 md:px-4 pointer-events-auto shadow-md relative overflow-hidden"
               >
                 <div className="flex items-center gap-1 min-w-0 flex-1 z-10">
                   <motion.button 
@@ -1882,50 +1862,48 @@ export const ChatWindow: React.FC = () => {
                         setIsRightPanelOpen(true);
                       }
                     }}
-                    className="flex items-center gap-3 cursor-pointer group/profile hover:bg-white/5 px-2 py-1 rounded-xl transition-all min-w-0"
+                    className="flex items-center gap-2.5 cursor-pointer group/profile hover:bg-white/5 px-2 py-1 rounded-xl transition-all min-w-0"
                   >
                     <div className="relative shrink-0">
                       <motion.img 
                         layoutId={`avatar-${activeChat.id}`}
                         src={activeChat.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(activeChat.title)}`} 
                         alt={activeChat.title} 
-                        className="w-[40px] h-[40px] rounded-full object-cover border border-white/10" 
+                        className="w-[38px] h-[38px] rounded-full object-cover border border-white/10" 
                       />
                       {activeChat.type === 'direct' && (
-                        <div className={`absolute right-0 bottom-0 w-3 h-3 rounded-full border-2 border-[#17212b] ${
+                        <div className={`absolute right-0 bottom-0 w-2.5 h-2.5 rounded-full border-2 border-[#17212b] ${
                           onlineUsers[activeChat.members.find(m => m !== currentUser?.uid) || ''] === 'online' ? 'bg-emerald-500' : 'bg-slate-600'
                         }`} />
                       )}
                     </div>
                     
                     <div className="min-w-0 flex-1">
-                      <h3 className="font-bold text-[15px] md:text-[16px] text-white truncate leading-tight tracking-tight">
+                      <h3 className="font-bold text-[15px] text-white truncate leading-tight tracking-tight">
                         {activeChat.type === 'direct' && activeChat.members.length === 1 && activeChat.members[0] === currentUser?.uid
                           ? (language === 'ru' ? 'Избранное' : 'Saved Messages')
                           : activeChat.title}
                       </h3>
                       <div className="flex items-center gap-2 mt-0.5">
                         {typingUsers.length > 0 ? (
-                          <span className="text-[11px] text-sky-400 font-medium flex items-center gap-1">
+                          <span className="text-[10px] text-sky-400 font-medium flex items-center gap-1">
                             {typingUsers.join(', ')} {language === 'ru' ? 'печатает...' : 'is typing...'}
                           </span>
                         ) : (
-                          <span className="text-[11px] text-slate-400 font-medium leading-none truncate">
+                          <span className="text-[10px] text-slate-400 font-medium leading-none truncate opacity-80">
                             {activeChat.type === 'direct' 
                               ? (() => {
                                   const partnerId = activeChat.members.find(m => m !== currentUser?.uid) || currentUser?.uid;
                                   const partner = globalUsers.find(u => u.uid === partnerId);
                                   const isOnline = onlineUsers[partnerId || ''] === 'online';
-                                  if (isOnline) return <span className="text-sky-400">{language === 'ru' ? 'в сети' : 'online'}</span>;
+                                  if (isOnline) return <span className="text-sky-400 font-bold">{language === 'ru' ? 'в сети' : 'online'}</span>;
                                   if (!partner?.lastSeen) return language === 'ru' ? 'был(а) недавно' : 'last seen recently';
                                   
-                                  const diff = Date.now() - partner.lastSeen;
+                                  const diff = Date.now() - (partner.lastSeen || 0);
                                   const mins = Math.floor(diff / 60000);
-                                  const hours = Math.floor(mins / 60);
                                   if (mins < 1) return language === 'ru' ? 'был(а) только что' : 'last seen just now';
                                   if (mins < 60) return language === 'ru' ? `был(а) ${mins} мин. назад` : `last seen ${mins}m ago`;
-                                  if (hours < 24) return (language === 'ru' ? 'был(а) в ' : 'last seen at ') + new Date(partner.lastSeen).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-                                  return (language === 'ru' ? 'был(а) ' : 'last seen ') + new Date(partner.lastSeen).toLocaleDateString();
+                                  return (language === 'ru' ? 'был(а) ' : 'last seen ') + new Date(partner.lastSeen).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
                                 })()
                               : `${activeChat.members?.length || 0} ${language === 'ru' ? 'участников' : 'members'}`}
                           </span>
@@ -1936,56 +1914,52 @@ export const ChatWindow: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-0.5 z-10">
-                  {activeChat.type === 'direct' && (
-                    <div className="flex items-center gap-0.5 hidden sm:flex">
-                      <motion.button 
-                        whileTap={{ scale: 0.9 }}
-                        onClick={async () => {
-                          try {
-                            await initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'voice');
-                          } catch (err: any) {
-                            setToast({ message: err.message, type: 'error' });
-                          }
-                        }}
-                        className="w-10 h-10 text-slate-400 hover:text-white hover:bg-white/5 rounded-full cursor-pointer transition flex items-center justify-center"
-                      >
-                        <Phone className="w-5 h-5" />
-                      </motion.button>
-                      <motion.button 
-                        whileTap={{ scale: 0.9 }}
-                        onClick={async () => {
-                          try {
-                            await initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'video');
-                          } catch (err: any) {
-                            setToast({ message: err.message, type: 'error' });
-                          }
-                        }}
-                        className="w-10 h-10 text-slate-400 hover:text-white hover:bg-white/5 rounded-full cursor-pointer transition flex items-center justify-center"
-                      >
-                        <Video className="w-5 h-5" />
-                      </motion.button>
-                    </div>
-                  )}
-                  
-                  <motion.button 
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setShowInChatSearch(!showInChatSearch)}
-                    className={`w-10 h-10 rounded-full cursor-pointer transition-all flex items-center justify-center ${showInChatSearch ? 'text-sky-400 bg-white/5' : 'text-slate-400 hover:bg-white/5'}`}
-                  >
-                    <Search className="w-5 h-5" />
-                  </motion.button>
-
-                  <motion.button 
-                    whileTap={{ scale: 0.9 }}
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setMenuPosition({ x: rect.right - 200, y: rect.bottom + 10 });
-                      setShowThreeDotMenu(!showThreeDotMenu);
-                    }}
-                    className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                  >
-                    <MoreVertical className="w-5 h-5" />
-                  </motion.button>
+                  <div className="flex items-center gap-0.5">
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={async () => {
+                        try {
+                          await initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'voice');
+                        } catch (err: any) {
+                          setToast({ message: err.message, type: 'error' });
+                        }
+                      }}
+                      className="w-10 h-10 text-slate-400 hover:text-white hover:bg-white/5 rounded-full cursor-pointer transition flex items-center justify-center"
+                    >
+                      <Phone className="w-[18px] h-[18px]" />
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={async () => {
+                        try {
+                          await initiateCall(activeChat.members.find(id => id !== currentUser?.uid) || '', 'video');
+                        } catch (err: any) {
+                          setToast({ message: err.message, type: 'error' });
+                        }
+                      }}
+                      className="w-10 h-10 text-slate-400 hover:text-white hover:bg-white/5 rounded-full cursor-pointer transition flex items-center justify-center"
+                    >
+                      <Video className="w-[18px] h-[18px]" />
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setShowInChatSearch(!showInChatSearch)}
+                      className={`w-10 h-10 rounded-full cursor-pointer transition-all flex items-center justify-center ${showInChatSearch ? 'text-sky-400 bg-white/5' : 'text-slate-400 hover:bg-white/5'}`}
+                    >
+                      <Search className="w-[18px] h-[18px]" />
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setMenuPosition({ x: rect.right - 200, y: rect.bottom + 10 });
+                        setShowThreeDotMenu(!showThreeDotMenu);
+                      }}
+                      className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </motion.button>
+                  </div>
                 </div>
 
                 {/* Floating Three-Dot Menu */}
@@ -2263,15 +2237,14 @@ export const ChatWindow: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Message Scrollable Window Stream */}
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative flex flex-col gap-2.5 scroll-smooth custom-scrollbar z-10 transition-colors duration-350 vision-scroll-area backdrop-blur-sm"
-        style={{ backgroundColor: getWallpaperStyle().backgroundColor.replace('0.8', '0.4') }}
+        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 relative flex flex-col gap-2.5 scroll-smooth custom-scrollbar z-10 transition-colors duration-350 vision-scroll-area"
+        style={{ background: 'transparent' }}
       >
         {/* Spacer for Floating Header */}
-        <div className="h-[96px] md:h-[108px] shrink-0" />
+        <div className="h-[72px] md:h-[80px] shrink-0" />
         
         {/* Simple Wallpaper Overlay */}
         <div 
@@ -2281,55 +2254,19 @@ export const ChatWindow: React.FC = () => {
         
         {visibleMessages.length === 0 ? (
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none max-w-sm mx-auto my-auto py-16 relative z-10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none max-w-sm mx-auto my-auto relative z-10"
           >
-            <div className="px-7 py-9 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md shadow-[0_15px_40px_-5px_rgba(0,0,0,0.4)] flex flex-col items-center max-w-xs relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
-              
-              {/* Premium Floating Sphere with interactive orbit feel */}
-              <motion.div 
-                animate={{ y: [0, -10, 0] }} 
-                transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut" }} 
-                className="relative w-20 h-20 mb-6 flex items-center justify-center shrink-0"
-              >
-                {/* Pulsing glow shadow below sphere */}
-                <motion.div 
-                  animate={{ scale: [1, 0.85, 1], opacity: [0.6, 0.3, 0.6] }} 
-                  transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut" }} 
-                  className="absolute -bottom-2 w-12 h-2 bg-cyan-500/20 rounded-full blur-md" 
-                />
-                
-                {/* Main Orb with heavy backdrop-blur */}
-                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-cyan-500/20 via-sky-400/5 to-transparent border border-cyan-400/30 backdrop-blur-xl shadow-[inset_0_4px_12px_rgba(255,255,255,0.15),0_8px_25px_rgba(34,211,238,0.15)] flex items-center justify-center">
-                  <MessageSquare className="w-8 h-8 text-cyan-400 drop-shadow-[0_2px_8px_rgba(6,182,212,0.5)]" />
-                </div>
-                
-                {/* Orbit sparks & encryption locks */}
-                <motion.div 
-                  animate={{ y: [-3, 3, -3], x: [3, -3, 3] }} 
-                  transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }} 
-                  className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-slate-900/90 border border-white/10 shadow-lg flex items-center justify-center text-[10px] backdrop-blur-sm"
-                >
-                  ✨
-                </motion.div>
-                
-                <motion.div 
-                  animate={{ y: [3, -3, 3], x: [-3, 3, -3] }} 
-                  transition={{ repeat: Infinity, duration: 3.6, ease: "easeInOut" }} 
-                  className="absolute -bottom-0.5 -left-1 w-5.5 h-5.5 rounded-full bg-slate-900/95 border border-cyan-500/20 shadow-lg flex items-center justify-center text-[9px] backdrop-blur-sm"
-                >
-                  🔒
-                </motion.div>
-              </motion.div>
-
-              <h4 className="text-[13.5px] font-bold text-slate-100 tracking-tight mb-2.5 font-sans">
-                {language === 'ru' ? 'Здесь пока пусто...' : 'No messages here yet'}
+            <div className="p-6 rounded-[24px] bg-black/20 border border-white/5 backdrop-blur-md flex flex-col items-center">
+              <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-4">
+                <MessageSquare className="w-6 h-6 text-slate-400" />
+              </div>
+              <h4 className="text-[14px] font-bold text-white mb-2">
+                {language === 'ru' ? 'Нет сообщений' : 'No messages'}
               </h4>
-              <p className="text-[11.5px] text-slate-400 leading-relaxed font-sans px-1">
-                {language === 'ru' ? 'Сообщения зашифрованы и защищены. Начните писать в поле ниже!' : 'All messages are fully encrypted. Start the conversation by sending a direct note below!'}
+              <p className="text-[12px] text-slate-400">
+                {language === 'ru' ? 'Напишите что-нибудь, чтобы начать общение' : 'Send a message to start the conversation'}
               </p>
             </div>
           </motion.div>
@@ -2339,589 +2276,223 @@ export const ChatWindow: React.FC = () => {
               const elements: React.ReactNode[] = [];
               let lastDateStr = '';
 
-            paginatedMessages.forEach((msg, idx) => {
-              // 1. Group by day date separator headings
-              const msgDate = new Date(msg.createdAt);
-              const dateStr = msgDate.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'en-US', { 
-                day: 'numeric', 
-                month: 'long', 
-                year: 'numeric' 
-              });
-              
-              if (dateStr !== lastDateStr) {
-                lastDateStr = dateStr;
-                elements.push(
-                  <div key={`date-header-${msg.id}`} className="flex justify-center my-4 select-none shrink-0">
-                    <span className="px-3.5 py-1 text-[12px] font-medium bg-[#1c242d]/60 backdrop-blur-md text-white rounded-full shadow-sm">
-                      {dateStr}
-                    </span>
-                  </div>
-                );
-              }
-
-              if (initialUnreadId === msg.id) {
-                elements.push(
-                  <div key="unread-separator" className="flex items-center w-full my-4 opacity-80 select-none">
-                    <div className="flex-1 border-t border-cyan-500/30"></div>
-                    <span className="px-3 text-[11px] font-bold text-sky-400/80 bg-[#0e1621] rounded-full">
-                      {language === 'ru' ? 'Непрочитанные сообщения' : 'Unread Messages'}
-                    </span>
-                    <div className="flex-1 border-t border-cyan-500/30"></div>
-                  </div>
-                );
-              }
-
-              const isMe = msg.senderId === currentUser?.uid;
-              const isRead = msg.readBy && msg.readBy.length > 0; // Simplified for MVP read detection
-              const isDelivered = msg.status === 'delivered' || msg.status === 'read';
-              const isCircularVideo = msg.type === 'video' && (msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note'));
-
-              // 2. Continuous message grouping by the same user within 3 mins (Telegram style clustering)
-              const prevMsg = paginatedMessages[idx - 1];
-              const nextMsg = paginatedMessages[idx + 1];
-              const isConsecutivePrev = prevMsg && prevMsg.senderId === msg.senderId && (msg.createdAt - prevMsg.createdAt < 3 * 60 * 1000);
-              const isConsecutiveNext = nextMsg && nextMsg.senderId === msg.senderId && (nextMsg.createdAt - msg.createdAt < 3 * 60 * 1000);
-
-              const bubbleRadius = isMe 
-                ? `rounded-[18px] ${isConsecutiveNext ? 'rounded-br-[6px]' : 'rounded-br-[6px]'} ${isConsecutivePrev ? 'rounded-tr-[6px]' : ''}` 
-                : `rounded-[18px] ${isConsecutiveNext ? 'rounded-bl-[6px]' : 'rounded-bl-[6px]'} ${isConsecutivePrev ? 'rounded-tl-[6px]' : ''}`;
-
-              elements.push(
-                <motion.div 
-                  key={msg.id}
-                  id={`msg-${msg.id}`}
-                  className={`message-swipe-container flex gap-1.5 max-w-[88%] md:max-w-[70%] select-none active:scale-[0.98] transition-all duration-150 ${isMe ? 'ml-auto flex-row-reverse' : 'mr-auto'} ${isConsecutivePrev ? 'mt-0.5' : 'mt-2'} relative ${activeMessageMenuId === msg.id ? 'z-[160]' : 'z-10'}`}
-                  initial={{ opacity: 0, y: 12, scale: 0.99 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  transition={{ 
-                    type: "spring",
-                    stiffness: 380,
-                    damping: 30,
-                    mass: 0.8
-                  }}
-                  layout="position"
-                  drag="x"
-                  dragDirectionLock
-                  dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={{ left: 0.22, right: 0.22 }}
-                  style={{ willChange: 'transform, opacity' }}
-                  onDrag={(e, info) => {
-                    const replyIconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
-                    const likeIconId = isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`;
-                    const replyIcon = document.getElementById(replyIconId);
-                    const likeIcon = document.getElementById(likeIconId);
-                    const swipeDist = isMe ? info.offset.x : -info.offset.x;
-
-                    if (swipeDist < 0) {
-                      if (replyIcon) {
-                        const progress = Math.min(Math.abs(swipeDist) / 45, 1);
-                        replyIcon.style.opacity = progress.toString();
-                        replyIcon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
-                        if (progress === 1 && replyIcon.dataset.vibrated !== 'true') {
-                          if ('vibrate' in navigator) navigator.vibrate(10);
-                          replyIcon.dataset.vibrated = 'true';
-                        } else if (progress < 1) {
-                          replyIcon.dataset.vibrated = 'false';
-                        }
-                      }
-                      if (likeIcon) {
-                        likeIcon.style.opacity = '0';
-                        likeIcon.style.transform = 'translateY(-50%) scale(0.5)';
-                      }
-                    } else if (swipeDist > 0) {
-                      if (likeIcon) {
-                        const progress = Math.min(Math.abs(swipeDist) / 45, 1);
-                        likeIcon.style.opacity = progress.toString();
-                        likeIcon.style.transform = `translateY(-50%) scale(${0.5 + progress * 0.5})`;
-                        if (progress === 1 && likeIcon.dataset.vibrated !== 'true') {
-                          if ('vibrate' in navigator) navigator.vibrate(10);
-                          likeIcon.dataset.vibrated = 'true';
-                        } else if (progress < 1) {
-                          likeIcon.dataset.vibrated = 'false';
-                        }
-                      }
-                      if (replyIcon) {
-                        replyIcon.style.opacity = '0';
-                        replyIcon.style.transform = 'translateY(-50%) scale(0.5)';
-                      }
-                    }
-                  }}
-                  onDragEnd={(e, info) => {
-                    const replyIconId = isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`;
-                    const likeIconId = isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`;
-                    const replyIcon = document.getElementById(replyIconId);
-                    const likeIcon = document.getElementById(likeIconId);
-
-                    if (replyIcon) {
-                      replyIcon.style.opacity = '0';
-                      replyIcon.style.transform = 'translateY(-50%) scale(0.5)';
-                      replyIcon.dataset.vibrated = 'false';
-                    }
-                    if (likeIcon) {
-                      likeIcon.style.opacity = '0';
-                      likeIcon.style.transform = 'translateY(-50%) scale(0.5)';
-                      likeIcon.dataset.vibrated = 'false';
-                    }
-
-                    const swipeDist = isMe ? info.offset.x : -info.offset.x;
-                    if (swipeDist < -45) {
-                      playTapSound();
-                      setReplyTarget(msg);
-                    } else if (swipeDist > 45) {
-                      handleTriggerReaction(msg.id, '👍');
-                      const clientX = (e as any).clientX || (e as any).changedTouches?.[0]?.clientX || window.innerWidth / 2;
-                      const clientY = (e as any).clientY || (e as any).changedTouches?.[0]?.clientY || window.innerHeight / 2;
-                      triggerFloatHeart(clientX, clientY);
-                      if ('vibrate' in navigator) navigator.vibrate([15, 30]);
-                    }
-                  }}
-                  onTouchStart={(e) => {
-                    const timer = setTimeout(() => {
-                      if ('vibrate' in navigator) navigator.vibrate(10);
-                      setActiveMessageMenuId(msg.id);
-                    }, 350);
-                    e.currentTarget.dataset.lph = timer.toString();
-                  }}
-                  onTouchMove={(e) => {
-                    const timer = e.currentTarget.dataset.lph;
-                    if (timer) clearTimeout(parseInt(timer));
-                  }}
-                  onTouchEnd={(e) => {
-                    const timer = e.currentTarget.dataset.lph;
-                    if (timer) clearTimeout(parseInt(timer));
-                  }}
-                  onTouchCancel={(e) => {
-                    const timer = e.currentTarget.dataset.lph;
-                    if (timer) clearTimeout(parseInt(timer));
-                  }}
-                  onContextMenu={(e: React.MouseEvent) => {
-                     e.preventDefault();
-                     setActiveMessageMenuId(msg.id);
-                  }}
-                >
-                  {/* Reply icon indicator that opacity-fades in when dragged */}
-                  <div className={`absolute ${isMe ? '-left-8' : '-right-8'} top-1/2 -translate-y-1/2 opacity-0 text-slate-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none transition-none`} id={isMe ? `reply-icon-right-${msg.id}` : `reply-icon-left-${msg.id}`}>
-                     <Reply className={`w-3.5 h-3.5 ${isMe ? 'scale-x-[-1]' : ''}`} />
-                  </div>
-                  {/* Thumbs up like reaction swipe indicator on the other side */}
-                  <div className={`absolute ${isMe ? '-right-8' : '-left-8'} top-1/2 -translate-y-1/2 opacity-0 text-amber-400 p-1 bg-slate-900 rounded-full shadow pointer-events-none transition-none`} id={isMe ? `like-icon-right-${msg.id}` : `like-icon-left-${msg.id}`}>
-                     <ThumbsUp className="w-3.5 h-3.5" />
-                  </div>
-                  {/* Left Avatar for other users (Hidden on consecutive piles) */}
-                  {!isMe && (
-                    <div 
-                      onClick={() => {
-                        const profile = globalUsers.find(u => u.uid === msg.senderId);
-                        if (profile) {
-                          setSelectedUserProfile(profile);
-                        } else {
-                          setSelectedUserProfile({
-                            uid: msg.senderId,
-                            displayName: msg.senderName,
-                            photoURL: msg.senderPhotoURL,
-                            username: msg.senderName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-                            bio: 'Hello, I am using VI Messenger!',
-                            createdAt: msg.createdAt
-                          } as any);
-                        }
-                      }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full overflow-hidden shrink-0 ${!isConsecutivePrev ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                    >
-                      {!isConsecutivePrev ? (
-                        <img src={msg.senderPhotoURL || undefined} alt={msg.senderName} className="w-full h-full object-cover border border-slate-900 shadow" />
-                      ) : (
-                        <div className="w-full h-full" />
-                      )}
+              paginatedMessages.forEach((msg, idx) => {
+                // 1. Group by day date separator headings
+                const msgDate = new Date(msg.createdAt);
+                const dateStr = msgDate.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'en-US', { 
+                  day: 'numeric', 
+                  month: 'long', 
+                });
+                
+                if (dateStr !== lastDateStr) {
+                  lastDateStr = dateStr;
+                  elements.push(
+                    <div key={`date-header-${msg.id}`} className="flex justify-center my-6 select-none shrink-0">
+                      <span className="px-4 py-1 text-[11px] font-bold bg-white/5 backdrop-blur-md text-slate-300 rounded-full border border-white/5 uppercase tracking-wider">
+                        {dateStr}
+                      </span>
                     </div>
-                  )}
+                  );
+                }
 
-                    {/* Message Core Box Stack */}
-                    <div className={`flex flex-col gap-0.5 group relative ${isMe ? 'items-end' : 'items-start'}`}>
-                      {/* Compact sender title display for non-me on starting bundle */}
-                      {!isMe && !isConsecutivePrev && (
-                        <span className="text-[10px] md:text-[11px] font-bold text-cyan-400 pl-1 mb-0.5 font-sans leading-none">
-                          {msg.senderName}
-                        </span>
-                      )}
+                if (initialUnreadId === msg.id) {
+                  elements.push(
+                    <div key="unread-separator" className="flex items-center w-full my-6 opacity-80 select-none">
+                      <div className="flex-1 border-t border-cyan-500/20"></div>
+                      <span className="px-3 text-[10px] font-bold text-cyan-400/80 bg-white/5 rounded-full uppercase tracking-widest py-0.5">
+                        {language === 'ru' ? 'Новые сообщения' : 'New Messages'}
+                      </span>
+                      <div className="flex-1 border-t border-cyan-500/20"></div>
+                    </div>
+                  );
+                }
 
-                      {/* Forwarded from info - Polish into a clean block inside the bubble if possible, or keep above with better styling */}
-                      {msg.forwardFrom && (
-                        <div className={`flex items-center gap-1.5 mb-1 opacity-70 ${isMe ? 'flex-row-reverse text-right pr-1' : 'pl-1'}`}>
-                          <Forward className="w-3 h-3 text-indigo-400" />
-                          <div className="text-[9px] leading-tight">
-                            <span className="text-slate-500 font-bold block uppercase tracking-tighter text-[7px]">
-                              {language === 'ru' ? 'Переслано от' : 'Forwarded from'}
-                            </span>
-                            <span className="text-indigo-300 font-bold">
-                              {msg.forwardFrom.senderName}
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                const isMe = msg.senderId === currentUser?.uid;
+                const isRead = msg.readBy && msg.readBy.length > 0;
+                const isDelivered = msg.status === 'delivered' || msg.status === 'read';
 
-                    {/* Highly stylized bubble with tail margins */}
-                    <div 
-                      onPointerDown={(e) => {
-                         const target = e.currentTarget;
-                         target.dataset.pointerDownStarted = Date.now().toString();
-                         target.dataset.longPressTriggered = 'false';
-                         target.dataset.timeoutId = setTimeout(() => {
-                           target.dataset.longPressTriggered = 'true';
-                           setActiveMessageMenuId(msg.id);
-                           if ('vibrate' in navigator) navigator.vibrate(20);
-                         }, 400).toString();
-                      }}
-                      onPointerUp={(e) => {
-                         const target = e.currentTarget;
-                         clearTimeout(parseInt(target.dataset.timeoutId || '0'));
-                         
-                         const pendingSingleTap = target.dataset.singleTapTimer;
-                         if (pendingSingleTap) {
-                           clearTimeout(parseInt(pendingSingleTap));
-                           target.dataset.singleTapTimer = '';
-                         }
+                // 2. Continuous message grouping by the same user within 5 mins
+                const prevMsg = paginatedMessages[idx - 1];
+                const nextMsg = paginatedMessages[idx + 1];
+                const isConsecutivePrev = prevMsg && prevMsg.senderId === msg.senderId && (msg.createdAt - prevMsg.createdAt < 5 * 60 * 1000);
+                const isConsecutiveNext = nextMsg && nextMsg.senderId === msg.senderId && (nextMsg.createdAt - msg.createdAt < 5 * 60 * 1000);
 
-                         if (target.dataset.longPressTriggered !== 'true') {
+                const bubbleRadius = isMe 
+                  ? `rounded-[18px] ${!isConsecutivePrev ? 'rounded-tr-[18px]' : 'rounded-tr-[6px]'} ${!isConsecutiveNext ? 'rounded-br-[18px]' : 'rounded-br-[6px]'}` 
+                  : `rounded-[18px] ${!isConsecutivePrev ? 'rounded-tl-[18px]' : 'rounded-tl-[6px]'} ${!isConsecutiveNext ? 'rounded-bl-[18px]' : 'rounded-bl-[6px]'}`;
+
+                elements.push(
+                  <motion.div 
+                    key={msg.id}
+                    id={`msg-${msg.id}`}
+                    className={`flex flex-col max-w-[85%] md:max-w-[75%] select-none active:scale-[0.99] transition-all duration-150 ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'} ${isConsecutivePrev ? 'mt-0.5' : 'mt-3'} relative ${activeMessageMenuId === msg.id ? 'z-[160]' : 'z-10'}`}
+                    initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ type: "spring", stiffness: 450, damping: 35, mass: 0.8 }}
+                    layout="position"
+                  >
+                    {!isMe && !isConsecutivePrev && activeChat.type === 'group' && (
+                      <span className="text-[11px] font-bold text-sky-400 pl-2 mb-0.5 tracking-tight">{msg.senderName}</span>
+                    )}
+
+                    <div className={`relative flex items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <div 
+                        onPointerDown={(e) => {
+                           const target = e.currentTarget;
+                           target.dataset.timeoutId = setTimeout(() => {
+                             setActiveMessageMenuId(msg.id);
+                             if ('vibrate' in navigator) navigator.vibrate(20);
+                           }, 450).toString();
+                        }}
+                        onPointerUp={(e) => {
+                           const target = e.currentTarget;
+                           clearTimeout(parseInt(target.dataset.timeoutId || '0'));
+                           if (activeMessageMenuId === msg.id) return;
+                           
+                           // Handle double tap for reaction
                            const now = Date.now();
                            const lastTap = parseInt(target.dataset.lastTap || '0');
                            if (now - lastTap < 300) {
-                             // It's a double tap! React with Heart dynamically
-                             e.stopPropagation();
                              handleTriggerReaction(msg.id, '❤️');
                              triggerFloatHeart(e.clientX, e.clientY);
                              if ('vibrate' in navigator) navigator.vibrate([15, 30]);
-                             setActiveMessageMenuId(null);
-                             target.dataset.lastTap = '0'; // reset
+                             target.dataset.lastTap = '0';
                            } else {
-                             // Single tap: queue the menu toggle safely
-                             const singlePlay = setTimeout(() => {
-                               setActiveMessageMenuId(prev => prev === msg.id ? null : msg.id);
-                             }, 200);
-                             target.dataset.singleTapTimer = singlePlay.toString();
                              target.dataset.lastTap = now.toString();
                            }
-                         }
-                      }}
-                      onPointerCancel={(e) => {
-                         const target = e.currentTarget;
-                         clearTimeout(parseInt(target.dataset.timeoutId || '0'));
-                         const pendingSingleTap = target.dataset.singleTapTimer;
-                         if (pendingSingleTap) {
-                           clearTimeout(parseInt(pendingSingleTap));
-                         }
-                      }}
-                      className={`relative transition-all duration-500 min-w-[60px] max-w-full ${
-                        msg.type === 'sticker' || (msg.type === 'video' && (msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note')))
-                          ? 'bg-transparent shadow-none' 
-                          : isMe 
-                            ? `py-1.5 px-3 bg-[#2b5278] shadow-sm ${bubbleRadius} ${!isConsecutiveNext ? 'rounded-br-none' : ''}` 
-                            : `py-1.5 px-3 bg-[#182533] shadow-sm ${bubbleRadius} ${!isConsecutiveNext ? 'rounded-bl-none' : ''}`
-                      } ${activeMessageMenuId === msg.id ? 'ring-2 ring-sky-500/50 scale-[1.01] z-[100]' : 'z-10'}`}
-                    >
-                      {/* Bubble Inner Glow/Reflection removed for standard look */}
-                      
-                      {/* Sender Name in Bubble for Groups */}
-                      {!isMe && !isConsecutivePrev && activeChat.type !== 'direct' && (
-                        <div 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const profile = globalUsers.find(u => u.uid === msg.senderId);
-                            if (profile) setSelectedUserProfile(profile);
-                          }}
-                          className="text-[12.5px] font-bold text-sky-400 mb-0.5 cursor-pointer hover:underline"
-                        >
-                          {msg.senderName}
-                        </div>
-                      )}
-
-                      {/* Edited status */}
-                      {msg.updatedAt && msg.updatedAt > msg.createdAt + 1000 && (
-                        <span className="text-[9px] text-slate-500/60 font-medium italic mb-1 px-1">
-                          {language === 'ru' ? 'изменено' : 'edited'}
-                        </span>
-                      )}
-
-                      {/* Reply To info block */}
-                      {msg.forwardFrom && (
-                        <div className="mb-1.5 flex items-center gap-1.5 px-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                          <Forward className="w-3 h-3 text-indigo-400" />
-                          <div className="text-[10px] leading-tight">
-                            <span className="text-slate-500 block uppercase font-bold tracking-tighter text-[8px]">
-                              {language === 'ru' ? 'Переслано от' : 'Forwarded from'}
-                            </span>
-                            <span className="text-indigo-400 font-bold">
-                              {msg.forwardFrom.senderName}
-                            </span>
+                        }}
+                        className={`message-bubble relative group/bubble min-w-[60px] transition-all ${
+                          msg.type === 'image' || msg.type === 'video' 
+                            ? 'p-0.5 overflow-hidden' 
+                            : 'px-3 py-1.5'
+                        } ${isMe ? 'glass-bubble-out' : 'glass-bubble-in'} ${bubbleRadius} shadow-md border border-white/10`}
+                      >
+                        {/* Reply Link */}
+                        {msg.replyTo && (
+                          <div 
+                            onClick={() => {
+                              const el = document.getElementById(`msg-${msg.replyTo?.messageId}`);
+                              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }}
+                            className="mb-1.5 border-l-2 border-white/30 bg-white/10 px-2 py-1 rounded-r-lg text-[11px] cursor-pointer"
+                          >
+                            <span className="font-bold opacity-70 block truncate">{msg.replyTo.senderName}</span>
+                            <span className="opacity-50 truncate block">{msg.replyTo.text}</span>
                           </div>
-                        </div>
-                      )}
-
-                      {msg.replyTo && (
-                        <div 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const el = document.getElementById(`msg-${msg.replyTo?.messageId}`);
-                            if (el) {
-                              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                              el.classList.add('animate-highlight');
-                              setTimeout(() => el.classList.remove('animate-highlight'), 2000);
-                            }
-                          }}
-                          className="border-l-[3px] border-cyan-400 bg-white/5 px-2.5 py-1.5 rounded-r-xl mb-2 text-xs cursor-pointer hover:bg-white/10 transition-colors"
-                        >
-                          <span className="font-bold text-[10px] text-cyan-400 block truncate leading-none mb-1 uppercase tracking-wider">{msg.replyTo.senderName}</span>
-                          <p className="truncate text-slate-300/80 leading-tight block text-[12px]">{msg.replyTo.text}</p>
-                        </div>
-                      )}
-
-                      {/* Forward indicator */}
-                      {msg.forwardFrom && (
-                        <div className="flex items-center gap-1.5 text-[9px] text-slate-400 mb-1.5 opacity-80">
-                          <Forward className="w-3 h-3" />
-                          <span>{language === 'ru' ? 'Переслано' : 'Forwarded'}</span>
-                        </div>
-                      )}
-
-                      {/* Message Rich Formats Rendering */}
-                      {msg.type === 'sticker' && (
-                        <div className="relative select-none max-w-[140px] p-0 mb-1">
-                          <img 
-                            src={msg.fileUrl || undefined} 
-                            alt="Sticker" 
-                            className="w-32 h-32 object-contain hover:scale-110 transition-transform duration-500 cursor-pointer drop-shadow-[0_8px_16px_rgba(0,0,0,0.3)]" 
-                          />
-                        </div>
-                      )}
-
-                      {msg.type === 'image' && (
-                        <div 
-                          className="mb-2 rounded-[18px] overflow-hidden shadow-2xl max-w-xs border border-white/10 bg-black/40 cursor-pointer hover:opacity-95 transition-all active:scale-[0.98] group relative"
-                          onClick={() => setSelectedImage(msg.fileUrl || null)}
-                        >
-                          <img src={msg.fileUrl || undefined} alt="Content" className="w-full h-auto object-cover max-h-[280px]" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                      )}
-
-                      {msg.type === 'video' && (
-                        (() => {
-                          const isCircularVideo = msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note');
-                          if (isCircularVideo) {
-                            return <CircularVideoNote src={msg.fileUrl || ''} />;
-                          }
-                          return (
-                            <div className="mb-2 rounded-[18px] overflow-hidden shadow-2xl max-w-xs bg-black border border-white/10 relative">
-                              <video src={msg.fileUrl || undefined} controls className="w-full h-auto" />
-                            </div>
-                          );
-                        })()
-                      )}
-
-                      {msg.type === 'voice' && (
-                        <div className="mb-1 py-1">
-                          <AudioWavePlayer src={msg.fileUrl || ''} duration={msg.duration} />
-                        </div>
-                      )}
-
-                      {msg.type === 'file' && (
-                        <a 
-                          href={msg.fileUrl} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="mb-2 flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-[18px] border border-white/10 max-w-xs cursor-pointer transition-all active:scale-95 shadow-lg group"
-                        >
-                          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 group-hover:bg-cyan-500 group-hover:text-white transition-all border border-cyan-500/20">
-                            {getFileIcon(msg.fileName || '')}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold truncate text-slate-100 text-[13px]">{msg.fileName}</p>
-                            {msg.fileSize && (
-                              <p className="text-[10px] font-medium text-slate-400 mt-0.5">{(msg.fileSize / 1024).toFixed(1)} KB</p>
-                            )}
-                          </div>
-                          <Download className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
-                        </a>
-                      )}
-
-                      {/* Polls */}
-                      {msg.type === 'poll' && msg.poll && (
-                        <div className="p-3 bg-white/5 rounded-2xl border border-white/10 w-full max-w-sm space-y-3 shadow-xl my-1">
-                          <div className="flex justify-between items-start gap-2 pb-2 border-b border-white/5">
-                            <h4 className="font-bold text-[13px] text-white/90">{msg.poll.question}</h4>
-                            <span className="text-[9px] bg-cyan-500/20 text-cyan-400 font-bold px-2 py-0.5 rounded-full uppercase tracking-tighter">
-                              {msg.poll.isAnonymous ? 'Anon' : 'Public'}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-1.5">
-                            {msg.poll.options.map((opt, oIdx) => {
-                              const totalVotes = msg.poll?.options.reduce((acc, current) => acc + current.votes.length, 0) || 0;
-                              const percentage = totalVotes === 0 ? 0 : Math.round((opt.votes.length / totalVotes) * 100);
-                              const isMyVote = opt.votes.includes(currentUser?.uid || '');
-
-                              return (
-                                <div 
-                                  key={oIdx} 
-                                  onClick={() => voteInPoll(msg.id, oIdx)}
-                                  className={`p-3 rounded-xl border transition-all cursor-pointer relative overflow-hidden flex justify-between items-center ${isMyVote ? 'bg-cyan-500/15 border-cyan-500/40' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
-                                >
-                                  <motion.div 
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${percentage}%` }}
-                                    className="absolute inset-y-0 left-0 bg-cyan-500/20 transition-all duration-700" 
-                                  />
-                                  <div className="flex items-center gap-2 relative z-10 truncate max-w-[80%]">
-                                    {isMyVote && <Check className="w-3.5 h-3.5 text-cyan-400 font-bold" />}
-                                    <span className={`text-[12px] font-medium ${isMyVote ? 'text-cyan-200' : 'text-slate-300'}`}>{opt.text}</span>
-                                  </div>
-                                  <span className="relative z-10 font-bold text-[10px] text-slate-400">
-                                    {percentage}%
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Text content */}
-                      {msg.type !== 'sticker' && msg.type !== 'poll' && !(msg.type === 'video' && (msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note'))) && msg.type !== 'voice' && (
-                        <div className="flex flex-col gap-1">
-                          <div className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text break-words pr-1 font-medium ${isMe ? 'text-white' : 'text-slate-100'}`}>
-                            {formatMarkdownText(msg.text, searchInChatQuery)}
-                          </div>
-                          <LinkPreview text={msg.text} />
-                        </div>
-                      )}
-
-                      {/* Footer: Time & Status */}
-                      <div className={`flex items-center justify-end gap-1 mt-1 opacity-50 select-none z-10 ${
-                        (msg.type === 'video' && (msg.fileName === 'video-note.webm' || msg.fileName?.includes('video-note'))) 
-                          ? 'absolute bottom-2 right-3 bg-black/40 px-1.5 py-0.5 rounded-full backdrop-blur-md' 
-                          : 'relative ml-auto float-right translate-y-1 translate-x-1'
-                      }`}>
-                        {msg.silent && <BellOff className="w-2.5 h-2.5 text-amber-400" />}
-                        <span className="text-[10px] font-normal text-white">
-                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        
-                        {isMe && (
-                          <span className="shrink-0 flex items-center ml-0.5">
-                            {msg.status === 'sending' ? (
-                              <div className="w-2 h-2 rounded-full border border-white/40 border-t-transparent animate-spin" />
-                            ) : (isRead || (msg.readBy && msg.readBy.length > 0)) ? (
-                              <div className="flex -space-x-1.5">
-                                <CheckCheck className="w-3.5 h-3.5 text-sky-300 stroke-[2.5]" />
-                              </div>
-                            ) : isDelivered ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-white/40 stroke-[2]" />
-                            ) : (
-                              <Check className="w-3.5 h-3.5 text-white/40 stroke-[2]" />
-                            )}
-                          </span>
                         )}
+
+                        {/* Content Rendering */}
+                        <div className="flex flex-col gap-1">
+                          {msg.type === 'text' && <p className="text-[14.5px] leading-snug whitespace-pre-wrap break-words">{msg.text}</p>}
+                          
+                          {msg.type === 'image' && (
+                            <div className="relative group/media cursor-zoom-in">
+                              <img 
+                                src={msg.fileUrl || ''} 
+                                className="rounded-[14px] max-w-full max-h-[340px] object-cover transition-transform group-hover/media:scale-[1.01]" 
+                                onClick={() => setSelectedImage(msg.fileUrl || null)}
+                                loading="lazy"
+                              />
+                            </div>
+                          )}
+
+                          {msg.type === 'video' && (
+                            <div className={`relative ${msg.fileName === 'video-note.webm' ? 'w-48 h-48 rounded-full overflow-hidden border-2 border-white/20 shadow-xl' : 'rounded-[14px] overflow-hidden max-w-full max-h-[340px]'}`}>
+                              <video 
+                                src={msg.fileUrl || ''} 
+                                controls={msg.fileName !== 'video-note.webm'}
+                                autoPlay={msg.fileName === 'video-note.webm'}
+                                loop={msg.fileName === 'video-note.webm'}
+                                muted={msg.fileName === 'video-note.webm'}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+
+                          {msg.type === 'voice' && (
+                            <div className="flex items-center gap-2 py-1 min-w-[180px] md:min-w-[220px]">
+                              <AudioWavePlayer src={msg.fileUrl || ''} duration={msg.duration} />
+                            </div>
+                          )}
+
+                          {msg.type === 'file' && (
+                            <a 
+                              href={msg.fileUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="flex items-center gap-3 p-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all group/file"
+                            >
+                              <div className="w-9 h-9 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 group-hover/file:bg-cyan-500 group-hover/file:text-white transition-all">
+                                <FileText className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[12.5px] font-bold truncate text-slate-100">{msg.fileName}</p>
+                                <p className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">{(msg.fileSize || 0) > 1024 * 1024 ? ((msg.fileSize || 0) / (1024 * 1024)).toFixed(1) + ' MB' : ((msg.fileSize || 0) / 1024).toFixed(1) + ' KB'}</p>
+                              </div>
+                            </a>
+                          )}
+
+                          {msg.type === 'poll' && msg.poll && (
+                            <div className="p-3 bg-white/5 rounded-2xl border border-white/10 w-full max-w-sm space-y-3 shadow-xl">
+                              <div className="flex justify-between items-start gap-2 pb-1.5 border-b border-white/5">
+                                <h4 className="font-bold text-[13px] text-white/90 leading-tight">{msg.poll.question}</h4>
+                              </div>
+                              <div className="space-y-1">
+                                {msg.poll.options.map((opt, oIdx) => {
+                                  const totalVotes = msg.poll?.options.reduce((acc, current) => acc + current.votes.length, 0) || 0;
+                                  const percentage = totalVotes === 0 ? 0 : Math.round((opt.votes.length / totalVotes) * 100);
+                                  const isMyVote = opt.votes.includes(currentUser?.uid || '');
+                                  return (
+                                    <div 
+                                      key={oIdx} 
+                                      onClick={() => voteInPoll(msg.id, oIdx)}
+                                      className={`p-2.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden flex justify-between items-center ${isMyVote ? 'bg-cyan-500/15 border-cyan-500/40' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                                    >
+                                      <div className="absolute inset-y-0 left-0 bg-cyan-500/10 transition-all duration-700" style={{ width: `${percentage}%` }} />
+                                      <div className="flex items-center gap-2 relative z-10 truncate max-w-[80%]">
+                                        {isMyVote && <Check className="w-3.5 h-3.5 text-cyan-400 font-bold" />}
+                                        <span className={`text-[12px] font-medium ${isMyVote ? 'text-cyan-200' : 'text-slate-300'}`}>{opt.text}</span>
+                                      </div>
+                                      <span className="relative z-10 font-bold text-[10px] text-slate-400">{percentage}%</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest text-center pt-1">
+                                {msg.poll.options.reduce((acc, current) => acc + current.votes.length, 0)} {language === 'ru' ? 'ГОЛОСОВ' : 'VOTES'} • {msg.poll.isAnonymous ? (language === 'ru' ? 'АНОНИМНО' : 'ANONYMOUS') : (language === 'ru' ? 'ПУБЛИЧНО' : 'PUBLIC')}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Info Row (Time & Status) */}
+                        <div className={`flex items-center gap-1 justify-end mt-0.5 select-none ${msg.type === 'text' ? 'float-right ml-4 -mr-1 mb-[-2px]' : 'absolute bottom-1.5 right-2 bg-black/30 backdrop-blur-sm px-1.5 py-0.5 rounded-full'}`}>
+                          <span className={`text-[10px] font-medium opacity-60`}>
+                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {isMe && (
+                            <div className="flex items-center text-cyan-300">
+                              {isRead ? <CheckCheck className="w-3 h-3" /> : isDelivered ? <Check className="w-3 h-3" /> : <Clock className="w-2.5 h-2.5 opacity-50" />}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Reactions display */}
+                      {/* Reactions Mini Tray */}
                       {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                        <div className={`absolute -bottom-3 ${isMe ? 'right-0' : 'left-0'} flex items-center gap-1 z-20`}>
-                          {Object.entries(
-                            Object.values(msg.reactions).reduce((acc: any, emoji) => {
-                              acc[emoji] = (acc[emoji] || 0) + 1;
-                              return acc;
-                            }, {})
-                          ).map(([emoji, count]: any) => (
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              key={emoji}
-                              onClick={() => handleTriggerReaction(msg.id, emoji)}
-                              className={`flex items-center gap-1.5 bg-black/60 backdrop-blur-xl border px-2 py-1 rounded-full text-[11px] shadow-xl transition-all ${
-                                Object.entries(msg.reactions || {}).some(([uid, e]) => uid === currentUser?.uid && e === emoji)
-                                  ? 'border-cyan-500/50 text-white ring-1 ring-cyan-500/20'
-                                  : 'border-white/10 text-slate-300 hover:border-white/20'
-                              }`}
-                            >
-                              <span className="filter drop-shadow-sm">{emoji}</span>
-                              {count > 1 && <span className="font-bold opacity-90 text-[9px]">{count}</span>}
-                            </motion.button>
+                        <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex items-center gap-0.5 bg-[#1c242d] border border-white/10 rounded-full px-1 py-0.5 shadow-sm z-20`}>
+                          {Object.entries(msg.reactions).map(([uid, emoji], i) => (
+                            <span key={uid} className="text-[10px]">{emoji}</span>
                           ))}
                         </div>
                       )}
                     </div>
+                  </motion.div>
+                );
+              });
 
-                    {/* High-end floating context menu */}
-                    <AnimatePresence>
-                      {activeMessageMenuId === msg.id && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                          className={`absolute bottom-[calc(100%+8px)] ${isMe ? 'right-0' : 'left-0'} z-[110] min-w-[200px] bg-black/60 backdrop-blur-3xl border border-white/10 rounded-[24px] shadow-[0_20px_60px_rgba(0,0,0,0.6)] p-2.5 flex flex-col gap-1.5 select-none animate-in fade-in zoom-in duration-200`}
-                        >
-                          {/* Quick Reactions Grid */}
-                          <div className="flex items-center justify-between px-1.5 py-1 mb-1 border-b border-white/5">
-                            {['👍', '❤️', '😂', '🔥', '😮', '🙏'].map(emoji => (
-                              <motion.button 
-                                whileHover={{ scale: 1.25, y: -2 }}
-                                whileTap={{ scale: 0.9 }}
-                                key={emoji}
-                                onClick={() => {
-                                  handleTriggerReaction(msg.id, emoji);
-                                  setActiveMessageMenuId(null);
-                                }}
-                                className="text-[18px] transition-all cursor-pointer p-1"
-                              >
-                                {emoji}
-                              </motion.button>
-                            ))}
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-1">
-                            <button onClick={() => { setReplyTarget(msg); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                              <Reply className="w-4 h-4 text-cyan-400" />
-                              {language === 'ru' ? 'Ответить' : 'Reply'}
-                            </button>
-                            <button onClick={() => { triggerCopyAction(msg.text); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                              <Copy className="w-4 h-4 text-slate-400" />
-                              {language === 'ru' ? 'Копировать' : 'Copy'}
-                            </button>
-                            <button onClick={() => { setForwardingMessage(msg); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                              <Forward className="w-4 h-4 text-indigo-400" />
-                              {language === 'ru' ? 'Переслать' : 'Forward'}
-                            </button>
-                            <button onClick={() => { pinMessage(activeChat.id, activeChat.pinnedMessageId === msg.id ? null : msg.id); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                              <Pin className={`w-4 h-4 ${activeChat.pinnedMessageId === msg.id ? 'text-cyan-400' : 'text-slate-400'}`} />
-                              {activeChat.pinnedMessageId === msg.id ? (language === 'ru' ? 'Открепить' : 'Unpin') : (language === 'ru' ? 'Закрепить' : 'Pin')}
-                            </button>
-                            <button onClick={() => { saveMessageToFavorites(msg); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                              <Bookmark className="w-4 h-4 text-amber-400" />
-                              {language === 'ru' ? 'В избранное' : 'Favorite'}
-                            </button>
-                            {isMe && (
-                              <button onClick={() => { setEditTarget(msg); setInputText(msg.text); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-white/10 rounded-xl text-[12.5px] font-medium text-slate-200 transition-all text-left">
-                                <Edit2 className="w-4 h-4 text-emerald-400" />
-                                {language === 'ru' ? 'Изм.' : 'Edit'}
-                              </button>
-                            )}
-                          </div>
-                          
-                          {isMe && (
-                            <button onClick={() => { deleteMessage(msg.id); setActiveMessageMenuId(null); }} className="flex items-center gap-2.5 w-full p-2.5 hover:bg-rose-500/10 rounded-xl text-[12.5px] font-bold text-rose-400 transition-all text-left mt-0.5">
-                              <Trash2 className="w-4 h-4 text-rose-500" />
-                              {language === 'ru' ? 'Удалить' : 'Delete'}
-                            </button>
-                          )}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </motion.div>
-              );
-            });
-
-            return elements;
-          })()}
+              return elements;
+            })()}
           </AnimatePresence>
         )}
 
@@ -3382,19 +2953,19 @@ export const ChatWindow: React.FC = () => {
           )}
 
           {/* Redesigned Floating Capsule Composer */}
-          <div className="px-2 pb-4 sm:px-4 sm:pb-6 z-[200] max-w-5xl mx-auto w-full pointer-events-none mt-auto">
+          <div className={`px-2 pb-4 sm:px-4 sm:pb-6 z-[200] max-w-5xl mx-auto w-full pointer-events-none mt-auto transition-all duration-300 ${!isKeyboardOpen ? 'mb-[80px]' : 'mb-0'}`}>
             <AnimatePresence>
               {replyTarget && (
                 <motion.div 
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="mx-2 mb-2 p-2 glass-surface-floating rounded-[22px] flex items-center gap-3 pointer-events-auto"
+                  className="mx-3 mb-2 p-2 glass-panel rounded-[18px] flex items-center gap-3 pointer-events-auto border border-white/10"
                 >
                   <div className="w-1 bg-cyan-500 h-8 rounded-full shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-bold text-cyan-400 leading-tight mb-0.5">{replyTarget.senderName}</p>
-                    <p className="text-[12px] text-slate-300 truncate">{replyTarget.text}</p>
+                    <p className="text-[12px] text-slate-300 truncate opacity-80">{replyTarget.text}</p>
                   </div>
                   <button onClick={() => { playTapSound(); setReplyTarget(null); }} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white transition-colors cursor-pointer">
                     <X className="w-4 h-4" />
@@ -3404,37 +2975,99 @@ export const ChatWindow: React.FC = () => {
             </AnimatePresence>
 
           <div className="flex items-end gap-2 pointer-events-auto px-2">
-            <div className="flex-1 bg-[#17212b] rounded-[24px] relative flex items-end overflow-hidden border border-white/5">
-              <motion.button 
-                type="button"
-                whileTap={{ scale: 0.9 }}
-                onClick={() => { playTapSound(); setShowAttachmentDropdown(!showAttachmentDropdown); }}
-                className={`w-12 h-12 flex items-center justify-center transition-colors shrink-0 ${showAttachmentDropdown ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                <Paperclip className="w-6 h-6" />
-              </motion.button>
-              
-              <TextareaAutosize
-                ref={inputRef as any}
-                autoFocus
-                placeholder={language === 'ru' ? 'Сообщение...' : 'Message...'}
-                value={inputText}
-                onChange={(e) => {
-                  handleInputChange(e.target.value);
-                  if (activeChat) sendTypingStatus(activeChat.id);
-                }}
-                onKeyDown={handleKeyDown}
-                className="flex-1 bg-transparent border-none text-white placeholder-slate-500 py-3 px-1 text-[16px] resize-none focus:outline-none max-h-[160px] min-h-[48px] leading-snug"
-              />
-              
-              <motion.button 
-                type="button"
-                whileTap={{ scale: 0.9 }}
-                onClick={() => { playTapSound(); setShowStickerPicker(!showStickerPicker); }}
-                className={`w-12 h-12 flex items-center justify-center transition-colors shrink-0 ${showStickerPicker ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                <Smile className="w-6 h-6" />
-              </motion.button>
+            <div className="flex-1 glass-panel rounded-[26px] relative flex items-end overflow-hidden border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] bg-white/[0.03] backdrop-blur-[40px]">
+              <AnimatePresence mode="wait">
+                {(recordingState !== 'idle' || videoRecordingState !== 'idle') ? (
+                  <motion.div 
+                    key="recording-ui"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="flex-1 flex items-center justify-between px-4 py-3 h-12"
+                  >
+                    <div className="flex items-center gap-3">
+                      <motion.div 
+                        animate={{ opacity: [1, 0.4, 1] }} 
+                        transition={{ repeat: Infinity, duration: 1 }}
+                        className="w-2.5 h-2.5 bg-rose-500 rounded-full" 
+                      />
+                      <span className="text-[14px] font-mono font-bold text-white tabular-nums">
+                        {(() => {
+                          const dur = recordingMode === 'voice' ? recordDuration : recordVideoDuration;
+                          return dur >= 60 ? `${Math.floor(dur/60)}:${(dur%60).toString().padStart(2, '0')}` : `0:${dur.toString().padStart(2, '0')}`;
+                        })()}
+                      </span>
+                    </div>
+
+                    <div className="flex-1 flex items-center justify-center gap-[2px] px-4 overflow-hidden h-6 opacity-60">
+                      {[...Array(20)].map((_, i) => (
+                        <motion.div 
+                          key={i}
+                          animate={{ height: ['40%', `${Math.random() * 100}%`, '40%'] }}
+                          transition={{ repeat: Infinity, duration: 0.5 + Math.random() }}
+                          className="w-[2px] bg-cyan-400 rounded-full"
+                        />
+                      ))}
+                    </div>
+
+                    {(recordingState === 'locked' || videoRecordingState === 'locked') && (
+                      <button 
+                        onClick={() => {
+                          if (recordingMode === 'voice') cancelRecording();
+                          else {
+                            isVideoCancelledRef.current = true;
+                            if (videoRecorderRef.current) videoRecorderRef.current.stop();
+                            setIsRecordingVideo(false);
+                            setVideoRecordingState('idle');
+                          }
+                        }}
+                        className="text-[12px] font-bold text-rose-400 hover:text-rose-300 uppercase tracking-widest px-2"
+                      >
+                        {language === 'ru' ? 'Отмена' : 'Cancel'}
+                      </button>
+                    )}
+                  </motion.div>
+                ) : (
+                  <motion.div 
+                    key="input-ui"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex-1 flex items-end"
+                  >
+                    <motion.button 
+                      type="button"
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => { playTapSound(); setShowAttachmentDropdown(!showAttachmentDropdown); }}
+                      className={`w-12 h-12 flex items-center justify-center transition-colors shrink-0 ${showAttachmentDropdown ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      <Paperclip className="w-5 h-5" />
+                    </motion.button>
+                    
+                    <TextareaAutosize
+                      ref={inputRef as any}
+                      autoFocus
+                      placeholder={language === 'ru' ? 'Сообщение...' : 'Message...'}
+                      value={inputText}
+                      onChange={(e) => {
+                        handleInputChange(e.target.value);
+                        if (activeChat) sendTypingStatus(activeChat.id);
+                      }}
+                      onKeyDown={handleKeyDown}
+                      className="flex-1 bg-transparent border-none text-white placeholder-slate-500 py-3 px-1 text-[15px] resize-none focus:outline-none max-h-[160px] min-h-[48px] leading-snug"
+                    />
+                    
+                    <motion.button 
+                      type="button"
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => { playTapSound(); setShowStickerPicker(!showStickerPicker); }}
+                      className={`w-12 h-12 flex items-center justify-center transition-colors shrink-0 ${showStickerPicker ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      <Smile className="w-5 h-5" />
+                    </motion.button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <motion.button 
@@ -3463,22 +3096,25 @@ export const ChatWindow: React.FC = () => {
                   else handleVideoRecordRelease();
                 }
               }}
-              className="w-[52px] h-[52px] rounded-full flex items-center justify-center shadow-md bg-sky-500 text-white shrink-0 hover:bg-sky-600 transition-colors"
+              className={`w-[48px] h-[48px] rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 shrink-0 ${
+                inputText.trim() ? 'bg-sky-500 text-white shadow-[0_0_20px_rgba(14,165,233,0.4)]' : 'bg-white/10 text-slate-300 backdrop-blur-xl border border-white/10'
+              }`}
             >
               <AnimatePresence mode="wait">
                 {inputText.trim() ? (
                   <motion.div key="send" initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: 45 }}>
-                    <Send className="w-6 h-6 fill-white" />
+                    <Send className="w-5 h-5 fill-white" />
                   </motion.div>
                 ) : (
                   <motion.div key={recordingMode} initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                    {recordingMode === 'voice' ? <Mic className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                    {recordingMode === 'voice' ? <Mic className="w-5 h-5" /> : <Video className="w-5 h-5" />}
                   </motion.div>
                 )}
               </AnimatePresence>
             </motion.button>
           </div>
           </div>
+
 
 
             {/* No old recording UI overlay */}

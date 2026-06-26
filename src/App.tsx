@@ -13,6 +13,7 @@ import { ProfilePanel } from './components/ProfilePanel';
 import { CallScreen } from './components/CallScreen';
 import { Onboarding } from './components/Onboarding';
 import { LockScreen } from './components/LockScreen';
+import { GlassDock } from './components/GlassDock';
 import { 
   Lock, 
   Mail, 
@@ -38,10 +39,17 @@ const MessengerContent: React.FC = () => {
     signupEmail,
     loginGoogle,
     resetPassword,
-    theme
+    theme,
+    chats,
+    sidebarView,
+    setSidebarView,
+    isKeyboardOpen,
+    setIsKeyboardOpen
   } = useMessenger();
 
   const { t, language, setLanguage } = useLanguage();
+
+  const unreadCount = chats.reduce((acc, chat) => acc + (chat.unreadCounts?.[currentUser?.uid || ''] || 0), 0);
 
   // App lock states
   const [isAppLocked, setIsAppLocked] = useState(() => {
@@ -96,6 +104,8 @@ const MessengerContent: React.FC = () => {
     const handleViewportResize = () => {
       if (window.visualViewport) {
         document.documentElement.style.setProperty('--app-height', `${window.visualViewport.height}px`);
+        // If visual viewport is significantly smaller than innerHeight, keyboard is likely open
+        setIsKeyboardOpen(window.visualViewport.height < window.innerHeight * 0.85);
       }
     };
 
@@ -257,6 +267,18 @@ const MessengerContent: React.FC = () => {
 
         {/* Floating WebRTC Ringing overlays */}
         {(activeCall || dialerCall) && <CallScreen />}
+
+        {/* Bottom Navigation Dock - Persistent & Premium */}
+        <AnimatePresence>
+          {!isKeyboardOpen && (
+            <GlassDock 
+              activeTab={sidebarView}
+              setActiveTab={setSidebarView}
+              language={language}
+              unreadCount={unreadCount}
+            />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
